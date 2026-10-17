@@ -1005,7 +1005,7 @@ const SESSION_STORAGE_KEY = "geoops-field-to-map-session-v1";
 const DRAFT_STORAGE_KEY = "geoops-field-to-map-drafts-v1";
 
 function getDraftStorageKey() {
-  return DRAFT_STORAGE_KEY + ":" + encodeURIComponent(teamName);
+  return DRAFT_STORAGE_KEY + ":" + encodeURIComponent(eventCode) + ":" + encodeURIComponent(teamName);
 }
 
 /* --- Data source config ---
@@ -1304,7 +1304,9 @@ function renderProjectedLeaderboard() {
     .sort((a, b) => b.total - a.total || a.team.localeCompare(b.team));
 
   const hasRealData = rows.length > 0;
-  const metaText = hasRealData
+  const metaText = window.GEOOPS_EVENT_STOPPED
+    ? 'EVENT STOPPED · final standings'
+    : hasRealData
     ? 'Live leaderboard · time + mission performance'
     : 'No live team scores yet · awaiting facilitator submissions';
 
@@ -1393,10 +1395,35 @@ function applyEventStopState(stopped) {
 }
 function pollEventStop() {
   if (!FIREBASE_ON || !eventCode) return;
-  fetch(fbUrl("events/" + encodeURIComponent(eventCode) + "/meta/stoppedAt"))
+  fetch(fbUrl("events/" + encodeURIComponent(eventCode) + "/meta/stoppedAt") + "?t=" + Date.now(), { cache: "no-store" })
     .then(fbJson)
     .then((value) => applyEventStopState(!!value))
     .catch(() => {});
+}
+let eventStopPollId = null;
+function startEventStopPolling() {
+  clearInterval(eventStopPollId);
+  pollEventStop();
+  eventStopPollId = setInterval(pollEventStop, 4000);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && started) pollEventStop(); });
+
+/* A saved session from a different event must never carry over into a new one. */
+function resetSavedSession() {
+  localStorage.removeItem(SESSION_STORAGE_KEY);
+  teamName = "";
+  eventCode = "";
+  eventStartTime = null;
+  eventDeadline = null;
+  unlockedIndex = 0;
+  completed = {};
+  activeIndex = 0;
+  m1Answers = {};
+  Object.keys(missionCheckinsSent).forEach((k) => delete missionCheckinsSent[k]);
+  applyEventStopState(false);
+  const select = document.getElementById("team-name-input");
+  Array.from(select.options).forEach((option) => { option.textContent = option.value || "Choose your team"; });
+  select.value = "";
 }
 
 function showTimeUp() {
@@ -2381,12 +2408,15 @@ function refreshPublicLeaderboard() {
   if (!FIREBASE_ON) { refreshLocalLeaderboard(); return; }
   const event = normalizeEventCode(localStorage.getItem(MC_EVENT_KEY));
   if (!event) return;
-  fetch(fbUrl("events/" + encodeURIComponent(event) + "/approved"))
-    .then(fbJson)
-    .then((data) => {
-      window.setGeoOpsLeaderboardData(buildLeaderboardEntries(Object.values(data || {})));
-    })
-    .catch(() => {});
+  const base = "events/" + encodeURIComponent(event);
+  const bust = "?t=" + Date.now();
+  Promise.all([
+    fetch(fbUrl(base + "/approved") + bust, { cache: "no-store" }).then(fbJson),
+    fetch(fbUrl(base + "/meta/stoppedAt") + bust, { cache: "no-store" }).then(fbJson).catch(() => null)
+  ]).then(([data, stoppedAt]) => {
+    window.GEOOPS_EVENT_STOPPED = !!stoppedAt;
+    window.setGeoOpsLeaderboardData(buildLeaderboardEntries(Object.values(data || {})));
+  }).catch(() => {});
 }
 
 function mcEl(tag, className, text) {
@@ -2455,6 +2485,7 @@ function mcRefresh() {
     if (!data || !data.ok) throw new Error((data && data.error) || "Could not load data.");
     mcData = { teams: data.teams || [], submissions: data.submissions || [] };
     mcRenderStopState(!!data.stopped);
+    window.GEOOPS_EVENT_STOPPED = !!data.stopped;
     mcSetError("");
     if (FIREBASE_ON) window.setGeoOpsLeaderboardData(buildLeaderboardEntries(mcData.submissions.filter((s) => s.status === "approved")));
     else refreshLocalLeaderboard();
@@ -2823,11 +2854,12 @@ document.getElementById("mc-filters").addEventListener("click", (event) => {
 });
 setInterval(() => {
   if (document.getElementById("command-display-screen").classList.contains("active")) refreshPublicLeaderboard();
-}, 15000);
+}, 5000);
 
 function startSession() {
   if (started) return;
   const codeInput = document.getElementById("event-code-input");
+  if (teamName && normalizeEventCode(codeInput.value) && normalizeEventCode(codeInput.value) !== eventCode) resetSavedSession();
   if (!FIREBASE_ON || teamName || !normalizeEventCode(codeInput.value)) { startSessionNow(); return; }
   const code = normalizeEventCode(codeInput.value);
   const errorEl = document.getElementById("team-name-error");
@@ -2885,8 +2917,7 @@ function startSessionNow() {
   cloudCheckin();
   tickEventClock();
   clockId = setInterval(tickEventClock, 1000);
-  pollEventStop();
-  setInterval(pollEventStop, 8000);
+  startEventStopPolling();
 }
 
 function showRoute(route) {
