@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="83 8 224 224" width="64" height="64" role="img" aria-label="GeoOps">
+  <rect x="83" y="8" width="224" height="224" fill="#FFFFFF"/>
+  <g stroke="#C97A2B" stroke-width="3" fill="none" stroke-linecap="square">
+    <path d="M123 64 L123 48 L139 48"/>
+    <path d="M251 48 L267 48 L267 64"/>
+    <path d="M267 176 L267 192 L251 192"/>
+    <path d="M139 192 L123 192 L123 176"/>
+  </g>
+  <circle cx="195" cy="120" r="64" fill="#1B2417" stroke="#35513C" stroke-width="1.5"/>
+  <circle cx="195" cy="120" r="50" fill="none" stroke="#E9E4D5" stroke-width="1" opacity="0.5"/>
+  <circle cx="195" cy="120" r="36" fill="none" stroke="#E9E4D5" stroke-width="1" opacity="0.35"/>
+  <circle cx="195" cy="120" r="22" fill="none" stroke="#E9E4D5" stroke-width="1" opacity="0.22"/>
+  <g stroke="#C97A2B" stroke-width="1.5">
+    <line x1="195" y1="50" x2="195" y2="62"/>
+    <line x1="195" y1="178" x2="195" y2="190"/>
+    <line x1="125" y1="120" x2="137" y2="120"/>
+    <line x1="253" y1="120" x2="265" y2="120"/>
+  </g>
+  <circle cx="195" cy="120" r="12" fill="none" stroke="#C97A2B" stroke-width="1.5"/>
+  <circle cx="195" cy="120" r="4.5" fill="#C97A2B"/>
+</svg>
