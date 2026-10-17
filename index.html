@@ -485,6 +485,15 @@
   .mc-answers dd { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .mc-review { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
   .mc-score { width: 90px; padding: 8px 10px; }
+  .mc-crit-row { display: grid; grid-template-columns: 1fr 90px; gap: 4px 10px; align-items: center; margin: 8px 0; }
+  .mc-crit-label { font-family: 'Space Grotesk', sans-serif; font-weight: 700; color: #1F3025; font-size: 13px; }
+  .mc-crit-hint { grid-column: 1; font-size: 12px; color: #526357; }
+  .mc-crit-row .mc-score { grid-column: 2; grid-row: 1 / span 2; }
+  .mc-rubric-total { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #213A28; margin: 6px 0; }
+  .finish-results { text-align: left; margin: 0 auto 20px; max-width: 520px; }
+  .finish-results h3 { font-family: 'Space Grotesk', sans-serif; color: #F2EFE4; font-size: 16px; margin: 14px 0 6px; }
+  .finish-crit { display: flex; justify-content: space-between; gap: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #C8C6BA; padding: 3px 0; border-bottom: 1px solid rgba(233,228,213,0.08); }
+  .finish-crit.total { color: #C97A2B; font-weight: 600; }
   .mc-empty { color: #657468; font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 16px; border: 1px dashed #AAB7AA; }
   @media (max-width: 620px) {
     .mc-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -807,9 +816,14 @@
         </div>
         <label class="field-label-sm" for="mc-password" style="margin-top:14px;">Facilitator password</label>
         <input class="mc-input" id="mc-password" type="password" autocomplete="current-password" required />
+        <div id="mc-judge-fields" hidden>
+          <label class="field-label-sm" for="mc-judge-name" style="margin-top:14px;">Your name (shown on your scores; required for judges)</label>
+          <input class="mc-input" id="mc-judge-name" type="text" maxlength="40" placeholder="e.g. Dr. Ada" />
+        </div>
         <div id="mc-gate-error" class="mc-error" role="alert"></div>
         <button class="submit-btn" id="mc-unlock" type="submit" style="margin-top:14px;">Unlock mission control</button>
         <button class="mc-btn" id="mc-create" type="button" hidden style="margin-top:10px;">Create a new event with this password</button>
+        <button class="mc-btn" id="mc-judge-signin" type="button" hidden style="margin-top:10px;">I'm a judge: sign in with the judge password</button>
       </form>
 
       <div id="mc-dashboard" class="mc-dashboard" hidden>
@@ -825,6 +839,25 @@
         <div id="mc-event-banner" class="summary-tag" hidden></div>
         <div class="mc-stats" id="mc-stats"></div>
 
+        <div id="mc-judging" hidden>
+          <h2 class="mc-heading">Judging and results</h2>
+          <div class="mc-updated" id="mc-judging-status"></div>
+          <div class="mc-review">
+            <label class="field-label-sm" for="mc-min-judges" style="margin:0;">Minimum judges per submission</label>
+            <input class="mc-input mc-score" id="mc-min-judges" type="number" min="1" max="10" step="1" value="2" />
+            <button class="mc-btn" id="mc-min-save" type="button">Save</button>
+          </div>
+          <div class="mc-review">
+            <input class="mc-input" id="mc-judge-pass" type="text" autocomplete="off" placeholder="Shared judge password (6+ characters)" style="max-width:320px;" />
+            <button class="mc-btn" id="mc-judge-pass-save" type="button">Set judge password</button>
+          </div>
+          <div class="mc-updated" id="mc-judge-pass-msg" role="status"></div>
+          <div class="mc-review">
+            <button class="mc-btn approve" id="mc-publish" type="button">Publish results to teams and leaderboard</button>
+          </div>
+          <div class="mc-updated" id="mc-publish-msg" role="status"></div>
+        </div>
+
         <div id="mc-import">
           <h2 class="mc-heading">Import team results</h2>
           <div class="mc-updated">Teams whose results did not arrive can give you their result code. Paste it below to add it to this event.</div>
@@ -838,6 +871,7 @@
           </div>
         </div>
 
+        <div id="mc-owner-sections">
         <h2 class="mc-heading">Teams</h2>
         <div class="mc-table-wrap">
           <table class="mc-table">
@@ -847,7 +881,7 @@
         </div>
 
         <h2 class="mc-heading">Scores by mission</h2>
-        <div class="mc-updated">Facilitator scores out of 10. Only approved submissions carry a score; rejected and pending ones are marked.</div>
+        <div class="mc-updated" id="mc-scores-note">Facilitator scores out of 10. Only approved submissions carry a score; rejected and pending ones are marked.</div>
         <div class="mc-actions" style="margin:8px 0;">
           <button class="mc-btn" id="mc-download" type="button">Download Excel</button>
         </div>
@@ -856,6 +890,7 @@
             <thead><tr><th>Team</th><th>M1</th><th>M2</th><th>M3</th><th>M4</th><th>M5</th><th>Total</th></tr></thead>
             <tbody id="mc-scores"></tbody>
           </table>
+        </div>
         </div>
 
         <h2 class="mc-heading">Submissions</h2>
@@ -2033,9 +2068,96 @@ function buildMission5Content() {
    Mission control (facilitator-only) + live data
    ============================================================ */
 let mcKey = null;
-let mcData = { teams: [], submissions: [] };
+let mcData = { teams: [], submissions: [], scores: {}, config: {}, publishedAt: null };
 let mcFilter = "pending";
 let mcTimerId = null;
+let mcRole = "owner"; // "owner" or "judge"
+let mcJudgeName = "";
+
+/* ---- Rubrics ----
+   Each scored mission is out of 10, split across criteria. Mission 1 is auto-scored. */
+const MIN_JUDGES_DEFAULT = 2;
+const RUBRICS = {
+  2: [
+    { id: "detection", label: "Detection accuracy", max: 4, hint: "Disturbed areas correctly identified and located." },
+    { id: "evidence", label: "Evidence and reasoning", max: 3, hint: "Each call is backed by what the imagery shows." },
+    { id: "uncertainty", label: "Honest uncertainty", max: 3, hint: "Says what is unclear and why." }
+  ],
+  3: [
+    { id: "tracing", label: "Route tracing accuracy", max: 4, hint: "Visible access routes traced accurately." },
+    { id: "status", label: "Active / inactive classification", max: 3, hint: "Routes judged active or inactive correctly." },
+    { id: "implication", label: "Implication reasoning", max: 3, hint: "Explains what the routes imply about ongoing logging." }
+  ],
+  4: [
+    { id: "synthesis", label: "Synthesis of findings", max: 4, hint: "Where, roughly when and access combined into one coherent statement." },
+    { id: "confidence", label: "Confidence statement", max: 3, hint: "A clear, justified confidence level." },
+    { id: "raise", label: "What would raise confidence", max: 3, hint: "Names the evidence that would strengthen the claim." }
+  ],
+  5: [
+    { id: "brief", label: "Policy brief: clarity and actionability", max: 3, hint: "What the authority should do, and why." },
+    { id: "structure", label: "Report structure", max: 2, hint: "Lede, Evidence, Human Stakes, Quote Slot, What Happens Next, Closing Line." },
+    { id: "honesty", label: "Evidence and honesty", max: 3, hint: "Carries Mission 4 confidence through; no overclaiming; no fabricated quotes." },
+    { id: "writing", label: "Writing and audience", max: 2, hint: "Journalist voice that suits a public audience." }
+  ]
+};
+
+function judgeKey(name) {
+  return String(name || "").trim().replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "judge";
+}
+
+function round2(value) {
+  return Math.round(value * 100) / 100;
+}
+
+/* Averages every judge's per-criterion marks; the mission total is the sum of the averages. */
+function averageScores(mission, entries) {
+  const rubric = RUBRICS[mission];
+  const valid = (entries || []).filter((e) => e && e.criteria);
+  if (!rubric || !valid.length) return { count: 0, total: null, criteria: {} };
+  const criteria = {};
+  let total = 0;
+  rubric.forEach((c) => {
+    const values = valid.map((e) => Math.min(c.max, Math.max(0, Number(e.criteria[c.id])))).filter(Number.isFinite);
+    const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+    criteria[c.id] = round2(avg);
+    total += avg;
+  });
+  return { count: valid.length, total: round2(total), criteria: criteria };
+}
+
+/* Latest submission per team and mission (resends replace the earlier one). */
+function latestSubmissions(subs) {
+  const byTeam = {};
+  subs.forEach((s) => {
+    const n = missionIndexOf(s.mission);
+    if (!s.teamName || n < 1 || n > MISSIONS.length) return;
+    const row = (byTeam[s.teamName] = byTeam[s.teamName] || {});
+    if (!row[n] || Number(s.receivedAt) > Number(row[n].receivedAt)) row[n] = s;
+  });
+  return byTeam;
+}
+
+function mcMinJudges() {
+  const value = Number(mcData.config && mcData.config.minJudges);
+  return value >= 1 ? value : MIN_JUDGES_DEFAULT;
+}
+
+function mcSubmissionScores(sid) {
+  return Object.values((mcData.scores || {})[sid] || {}).filter(Boolean);
+}
+
+function mcGradingProgress() {
+  const latest = latestSubmissions(mcData.submissions);
+  let gradeable = 0, graded = 0;
+  Object.keys(latest).forEach((team) => {
+    Object.keys(latest[team]).forEach((n) => {
+      if (!RUBRICS[n]) return;
+      gradeable += 1;
+      if (averageScores(Number(n), mcSubmissionScores(latest[team][n].submissionId)).count >= mcMinJudges()) graded += 1;
+    });
+  });
+  return { gradeable: gradeable, graded: graded };
+}
 
 /* ---- Local storage backend ----
    Imported result codes, verification and reviews are stored in this browser;
@@ -2228,6 +2350,82 @@ function fbSignIn(event, password) {
   return fbAuthCall("signInWithPassword", eventEmail(event), password);
 }
 
+/* Judges share one account per event; their individual names are recorded on each score. */
+function judgeEmail(event) {
+  return "judge-" + eventEmail(event);
+}
+
+function fbJudgeSignIn(event, password) {
+  return fbAuthCall("signInWithPassword", judgeEmail(event), password);
+}
+
+/* Owner-only: creates (or re-keys) the shared judge account and registers it on the event. */
+async function fbSetJudgeAccess(event, ownerToken, password) {
+  const email = judgeEmail(event);
+  const base = "events/" + encodeURIComponent(event);
+  let auth = await fbAuthCall("signUp", email, password);
+  if (auth.error === "EMAIL_EXISTS") {
+    const secret = await fetch(fbUrl(base + "/judgeSecret", ownerToken)).then(fbJson);
+    const existing = secret ? await fbAuthCall("signInWithPassword", email, secret) : { error: "NO_SECRET" };
+    if (existing.error) throw new Error("Judge access already exists and could not be changed (" + existing.error + ").");
+    const changed = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:update?key=" + encodeURIComponent(FIREBASE_CONFIG.apiKey), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken: existing.idToken, password: password, returnSecureToken: false })
+    }).then((response) => response.json());
+    if (changed.error) throw new Error("Could not change the judge password (" + changed.error.message + ").");
+    auth = existing;
+  } else if (auth.error) {
+    throw new Error("Could not create judge access (" + auth.error + ").");
+  }
+  const update = { judgeSecret: password };
+  update["judges/" + auth.uid] = true;
+  await fetch(fbUrl(base, ownerToken), { method: "PATCH", body: JSON.stringify(update) }).then(fbJson);
+}
+
+/* Owner: whole event. Judge: only the nodes the rules let them read. */
+async function loadEventData(base, token) {
+  if (mcRole !== "judge") return (await fetch(fbUrl(base, token)).then(fbJson)) || {};
+  const [submissions, scores, meta] = await Promise.all([
+    fetch(fbUrl(base + "/submissions", token)).then(fbJson),
+    fetch(fbUrl(base + "/scores", token)).then(fbJson),
+    fetch(fbUrl(base + "/meta", token)).then(fbJson)
+  ]);
+  return { submissions: submissions || {}, scores: scores || {}, meta: meta || {} };
+}
+
+/* Builds the public leaderboard entries and per-team breakdowns from every judge's saved scores. */
+function fbPublish(base, token, data) {
+  const minJudges = Math.max(1, Number(data.config && data.config.minJudges) || MIN_JUDGES_DEFAULT);
+  const subs = Object.keys(data.submissions || {}).map((id) => Object.assign({}, data.submissions[id], { submissionId: id }));
+  const latest = latestSubmissions(subs);
+  const approved = {};
+  const published = {};
+  let included = 0, skipped = 0;
+  Object.keys(latest).forEach((team) => {
+    Object.keys(latest[team]).forEach((n) => {
+      const s = latest[team][n];
+      if (!RUBRICS[n]) {
+        approved[s.submissionId] = { teamName: team, mission: s.mission, elapsed: s.elapsed || "" };
+        return;
+      }
+      const avg = averageScores(Number(n), Object.values((data.scores || {})[s.submissionId] || {}));
+      if (avg.count < minJudges) { skipped += 1; return; }
+      approved[s.submissionId] = { teamName: team, mission: s.mission, elapsed: s.elapsed || "", score: avg.total };
+      const key = teamKey(team);
+      published[key] = published[key] || { teamName: team, missions: {} };
+      published[key].missions[n] = { total: avg.total, criteria: avg.criteria };
+      included += 1;
+    });
+  });
+  const update = {
+    approved: Object.keys(approved).length ? approved : null,
+    published: Object.keys(published).length ? published : null,
+    "meta/publishedAt": Date.now()
+  };
+  return fetch(fbUrl(base, token), { method: "PATCH", body: JSON.stringify(update) }).then(fbJson)
+    .then(() => ({ included: included, skipped: skipped, minJudges: minJudges }));
+}
+
 function generateEventCode() {
   const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
   const bytes = crypto.getRandomValues(new Uint8Array(6));
@@ -2272,13 +2470,43 @@ function cloudApi(body) {
   const event = normalizeEventCode(localStorage.getItem(MC_EVENT_KEY));
   if (!event) return Promise.resolve({ ok: false, code: "noevent", error: "Enter the event code." });
   const signIn = body.action === "list" && !fbState.auth
-    ? fbSignIn(event, body.key).then((auth) => { fbState.auth = auth.error ? null : auth; })
+    ? (mcRole === "judge" ? fbJudgeSignIn(event, body.key) : fbSignIn(event, body.key)).then((auth) => { fbState.auth = auth.error ? null : auth; })
     : Promise.resolve();
   return signIn.then(fbToken).then((token) => {
-    if (!token) return { ok: false, code: "unauthorized", error: "Incorrect event code or password." };
+    if (!token) return { ok: false, code: "unauthorized", error: mcRole === "judge" ? "Incorrect event code or judge password." : "Incorrect event code or password." };
     const base = "events/" + encodeURIComponent(event);
+    const ownerOnly = ["verifyTeam", "review", "setStopped", "setMinJudges", "publish", "setJudgeAccess"];
+    if (mcRole === "judge" && ownerOnly.indexOf(body.action) !== -1) return { ok: false, error: "Only the event owner can do that." };
     let write = Promise.resolve();
-    if (body.action === "verifyTeam") {
+    let publishInfo = null;
+    if (body.action === "saveScores") {
+      const sub = mcData.submissions.find((s) => s.submissionId === body.submissionId);
+      if (!sub) return { ok: false, error: "Submission not found." };
+      const rubric = RUBRICS[missionIndexOf(sub.mission)];
+      if (!rubric) return { ok: false, error: "This mission is not scored with a rubric." };
+      const judge = String(body.judge || "").trim();
+      if (!judge) return { ok: false, error: "Enter your name before scoring." };
+      const criteria = {};
+      let total = 0;
+      for (const c of rubric) {
+        const value = body.criteria[c.id] === "" || body.criteria[c.id] == null ? NaN : Number(body.criteria[c.id]);
+        if (!isFinite(value) || value < 0 || value > c.max) return { ok: false, error: c.label + " must be a number from 0 to " + c.max + "." };
+        criteria[c.id] = value;
+        total += value;
+      }
+      write = fetch(fbUrl(base + "/scores/" + encodeURIComponent(sub.submissionId) + "/" + judgeKey(judge), token), {
+        method: "PUT", body: JSON.stringify({ judge: judge, criteria: criteria, total: round2(total), at: Date.now() })
+      }).then(fbJson);
+    } else if (body.action === "setMinJudges") {
+      const value = Math.floor(Number(body.value));
+      if (!(value >= 1 && value <= 10)) return { ok: false, error: "Minimum judges must be between 1 and 10." };
+      write = fetch(fbUrl(base + "/config/minJudges", token), { method: "PUT", body: JSON.stringify(value) }).then(fbJson);
+    } else if (body.action === "setJudgeAccess") {
+      if (String(body.password || "").length < 6) return { ok: false, error: "Choose a judge password of at least 6 characters." };
+      write = fbSetJudgeAccess(event, token, String(body.password));
+    } else if (body.action === "publish") {
+      write = loadEventData(base, token).then((data) => fbPublish(base, token, data)).then((info) => { publishInfo = info; });
+    } else if (body.action === "verifyTeam") {
       write = fetch(fbUrl(base + "/verified/" + teamKey(body.teamName), token), {
         method: "PUT", body: JSON.stringify(body.verified === true ? { verified: true, at: Date.now() } : null)
       }).then(fbJson);
@@ -2304,7 +2532,7 @@ function cloudApi(body) {
     } else if (body.action !== "list") {
       return { ok: false, error: "Unknown action." };
     }
-    return write.then(() => fetch(fbUrl(base, token)).then(fbJson)).then((data) => {
+    return write.then(() => loadEventData(base, token)).then((data) => {
       data = data || {};
       const checkins = data.checkins || {};
       const verified = data.verified || {};
@@ -2332,7 +2560,11 @@ function cloudApi(body) {
           answers: s.answers || {}, status: r.status || "pending", score: r.score === undefined ? null : r.score, reviewedAt: r.at || null
         };
       });
-      return { ok: true, teams: teams, submissions: submissions, stopped: !!(data.meta && data.meta.stoppedAt) };
+      return {
+        ok: true, teams: teams, submissions: submissions, stopped: !!(data.meta && data.meta.stoppedAt),
+        scores: data.scores || {}, config: data.config || {}, publishedAt: (data.meta && data.meta.publishedAt) || null,
+        publishInfo: publishInfo
+      };
     });
   }).catch((error) => {
     if (error && error.code === "denied") return { ok: false, code: "unauthorized", error: "This password does not control that event." };
@@ -2466,7 +2698,7 @@ function mcSetError(message) {
 function lockMissionControl(message) {
   mcKey = null;
   fbState.auth = null;
-  mcData = { teams: [], submissions: [] };
+  mcData = { teams: [], submissions: [], scores: {}, config: {}, publishedAt: null };
   clearInterval(mcTimerId);
   mcTimerId = null;
   document.getElementById("mc-dashboard").hidden = true;
@@ -2476,9 +2708,17 @@ function lockMissionControl(message) {
   document.getElementById("mc-gate-error").textContent = message || "";
 }
 
+function mcSetData(data) {
+  mcData = {
+    teams: data.teams || [], submissions: data.submissions || [],
+    scores: data.scores || {}, config: data.config || {}, publishedAt: data.publishedAt || null
+  };
+}
+
 let mcStopped = false;
 function mcRenderStopState(stopped) {
   mcStopped = stopped;
+  if (mcRole === "judge") return;
   const btn = document.getElementById("mc-stop");
   btn.hidden = !FIREBASE_ON;
   btn.textContent = stopped ? "Resume event" : "Stop event";
@@ -2512,12 +2752,11 @@ function mcRefresh() {
       return;
     }
     if (!data || !data.ok) throw new Error((data && data.error) || "Could not load data.");
-    mcData = { teams: data.teams || [], submissions: data.submissions || [] };
+    mcSetData(data);
     mcRenderStopState(!!data.stopped);
     window.GEOOPS_EVENT_STOPPED = !!data.stopped;
     mcSetError("");
-    if (FIREBASE_ON) window.setGeoOpsLeaderboardData(buildLeaderboardEntries(mcData.submissions.filter((s) => s.status === "approved")));
-    else refreshLocalLeaderboard();
+    if (!FIREBASE_ON) refreshLocalLeaderboard();
     document.getElementById("mc-updated").textContent = "Updated " + new Date().toLocaleTimeString();
     mcRender();
   }).catch(() => {
@@ -2535,9 +2774,13 @@ function mcRender() {
   const verified = TEAM_NAMES.filter((n) => teamInfo[n] && teamInfo[n].verified).length;
   const pending = mcData.submissions.filter((s) => s.status === "pending").length;
   const approved = mcData.submissions.filter((s) => s.status === "approved").length;
+  const progress = mcGradingProgress();
+  const lastStats = FIREBASE_ON
+    ? [[progress.graded + "/" + progress.gradeable, "Fully graded"], [mcData.publishedAt ? "Yes" : "Not yet", "Published"]]
+    : [[pending, "Pending review"], [approved, "Approved"]];
   const stats = document.getElementById("mc-stats");
   stats.replaceChildren();
-  [[checkedIn + "/" + TEAM_NAMES.length, "Checked in"], [verified, "Verified"], [pending, "Pending review"], [approved, "Approved"]]
+  [[checkedIn + "/" + TEAM_NAMES.length, "Checked in"], [verified, "Verified"]].concat(lastStats)
     .forEach(([value, label]) => {
       const card = mcEl("div", "mc-stat");
       card.append(mcEl("b", "", String(value)), mcEl("span", "", label));
@@ -2559,7 +2802,9 @@ function mcRender() {
     }
     const approvedCount = subs.filter((s) => s.status === "approved").length;
     const pendingCount = subs.filter((s) => s.status === "pending").length;
-    row.appendChild(mcEl("td", "", approvedCount + " approved · " + pendingCount + " pending"));
+    row.appendChild(mcEl("td", "", FIREBASE_ON
+      ? new Set(subs.map((s) => missionIndexOf(s.mission))).size + " of " + MISSIONS.length + " missions submitted"
+      : approvedCount + " approved · " + pendingCount + " pending"));
     const verifyCell = document.createElement("td");
     const box = document.createElement("input");
     box.type = "checkbox";
@@ -2579,6 +2824,7 @@ function mcRender() {
 
   mcRenderScores();
   mcRenderSubmissions();
+  mcRenderJudging();
 }
 
 /* Latest submission per team and mission; approved ones carry the facilitator's score. */
@@ -2601,7 +2847,38 @@ function mcScoreLabel(sub) {
   return sub.status === "rejected" ? "Rejected" : "Pending";
 }
 
+/* Cloud mode: the average of every judge's marks per submission, held here until published. */
+function mcCloudCell(sub, n) {
+  if (!sub) return { text: "—", value: "", cls: "" };
+  if (!RUBRICS[n]) return { text: "Auto", value: "Auto", cls: "" };
+  const avg = averageScores(n, mcSubmissionScores(sub.submissionId));
+  if (!avg.count) return { text: "Not scored", value: "Not scored", cls: "" };
+  const enough = avg.count >= mcMinJudges();
+  return { text: avg.total + " · " + avg.count + "j" + (enough ? "" : " (needs " + mcMinJudges() + ")"), value: avg.total, cls: enough ? " ok" : "" };
+}
+
+function mcRenderScoresCloud() {
+  const body = document.getElementById("mc-scores");
+  body.replaceChildren();
+  const latest = latestSubmissions(mcData.submissions);
+  TEAM_NAMES.forEach((name) => {
+    const row = document.createElement("tr");
+    row.appendChild(mcEl("td", "", name));
+    let total = 0;
+    for (let n = 1; n <= MISSIONS.length; n += 1) {
+      const cell = mcCloudCell((latest[name] || {})[n], n);
+      if (typeof cell.value === "number") total += cell.value;
+      const td = document.createElement("td");
+      td.appendChild(mcEl("span", "mc-pill" + cell.cls, cell.text));
+      row.appendChild(td);
+    }
+    row.appendChild(mcEl("td", "", String(round2(total))));
+    body.appendChild(row);
+  });
+}
+
 function mcRenderScores() {
+  if (FIREBASE_ON) { mcRenderScoresCloud(); return; }
   const body = document.getElementById("mc-scores");
   body.replaceChildren();
   const grid = mcScoreGrid();
@@ -2622,7 +2899,20 @@ function mcRenderScores() {
 }
 
 function mcDownloadExcel() {
-  const grid = mcScoreGrid();
+  const grid = FIREBASE_ON ? {} : mcScoreGrid();
+  const latestSubs = latestSubmissions(mcData.submissions);
+  const judgeRows = [["Team", "Mission", "Judge", "Criterion", "Score", "Max"]];
+  if (FIREBASE_ON) {
+    Object.keys(latestSubs).forEach((team) => {
+      Object.keys(latestSubs[team]).forEach((n) => {
+        const rubric = RUBRICS[n];
+        if (!rubric) return;
+        mcSubmissionScores(latestSubs[team][n].submissionId).forEach((entry) => {
+          rubric.forEach((c) => judgeRows.push([team, "M" + n, entry.judge || "", c.label, entry.criteria ? entry.criteria[c.id] : "", c.max]));
+        });
+      });
+    });
+  }
   const teamInfo = {};
   mcData.teams.forEach((t) => { teamInfo[t.teamName] = t; });
   const checkins = [["Team", "M1 checked in", "M2 checked in", "M3 checked in", "M4 checked in", "M5 checked in"]];
@@ -2636,10 +2926,14 @@ function mcDownloadExcel() {
       const at = n === 1 ? info.checkedInAt : (info.missionCheckins || {})[n];
       crow.push(at ? new Date(at).toLocaleString() : "");
       const sub = (grid[name] || {})[n];
-      if (sub && sub.status === "approved" && Number.isFinite(Number(sub.score))) { total += Number(sub.score); srow.push(Number(sub.score)); }
+      if (FIREBASE_ON) {
+        const cell = mcCloudCell((latestSubs[name] || {})[n], n);
+        if (typeof cell.value === "number") total += cell.value;
+        srow.push(cell.value);
+      } else if (sub && sub.status === "approved" && Number.isFinite(Number(sub.score))) { total += Number(sub.score); srow.push(Number(sub.score)); }
       else srow.push(sub ? mcScoreLabel(sub) : "");
     }
-    srow.push(total);
+    srow.push(round2(total));
     checkins.push(crow);
     scores.push(srow);
   });
@@ -2648,12 +2942,13 @@ function mcDownloadExcel() {
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(scores), "Scores");
     XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(checkins), "Check-ins");
+    if (FIREBASE_ON) XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(judgeRows), "Judge scores");
     XLSX.writeFile(book, fileName + ".xlsx");
     return;
   }
   // Offline fallback: CSV with a BOM opens correctly in Excel.
   const csv = (rows) => rows.map((r) => r.map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(",")).join("\r\n");
-  const blob = new Blob(["\uFEFF" + csv(scores) + "\r\n\r\n" + csv(checkins)], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob(["\uFEFF" + csv(scores) + "\r\n\r\n" + csv(checkins) + (FIREBASE_ON ? "\r\n\r\n" + csv(judgeRows) : "")], { type: "text/csv;charset=utf-8" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
   link.download = fileName + ".csv";
@@ -2676,7 +2971,182 @@ function mcRenderAnswer(container, value) {
   }
 }
 
+/* Cloud mode: each judge scores every criterion; nothing is public until the owner publishes. */
+function mcRenderSubmissionsCloud() {
+  const list = document.getElementById("mc-submissions");
+  const drafts = {};
+  let focusedId = null;
+  list.querySelectorAll("input.mc-crit").forEach((input) => {
+    const id = input.dataset.sid + "|" + input.dataset.crit;
+    if (input.value !== input.defaultValue) drafts[id] = input.value;
+    if (input === document.activeElement) focusedId = id;
+  });
+  list.replaceChildren();
+  document.querySelectorAll("#mc-filters .mc-btn").forEach((b) => b.classList.toggle("active", b.dataset.filter === mcFilter));
+
+  const myKey = judgeKey(mcJudgeName);
+  const myEntry = (s) => ((mcData.scores || {})[s.submissionId] || {})[myKey] || null;
+  const latest = latestSubmissions(mcData.submissions);
+  const all = [];
+  Object.keys(latest).forEach((team) => Object.keys(latest[team]).forEach((n) => all.push(latest[team][n])));
+  const rows = all
+    .filter((s) => {
+      if (mcFilter === "all") return true;
+      if (!RUBRICS[missionIndexOf(s.mission)]) return false;
+      return mcFilter === "done" ? !!myEntry(s) : !myEntry(s);
+    })
+    .sort((a, b) => Number(b.receivedAt) - Number(a.receivedAt));
+  if (!rows.length) {
+    list.appendChild(mcEl("div", "mc-empty", mcFilter === "todo" ? "Nothing waiting for your score." : mcFilter === "done" ? "You haven't scored any submissions yet." : "No submissions yet."));
+    return;
+  }
+
+  rows.forEach((s) => {
+    const n = missionIndexOf(s.mission);
+    const rubric = RUBRICS[n];
+    const entries = mcSubmissionScores(s.submissionId);
+    const mine = myEntry(s);
+    const card = mcEl("div", "mc-sub");
+    const head = mcEl("div", "mc-sub-head");
+    const pillText = !rubric ? "auto-scored" : mcRole === "owner"
+      ? entries.length + " judge" + (entries.length === 1 ? "" : "s") + (entries.length ? " · avg " + averageScores(n, entries).total + "/10" : "")
+      : mine ? "scored by you · " + mine.total + "/10" : "not scored by you";
+    head.append(mcEl("div", "mc-sub-title", s.teamName + " — " + s.mission),
+      mcEl("span", "mc-pill" + (rubric && mine ? " ok" : ""), pillText));
+    card.appendChild(head);
+    card.appendChild(mcEl("div", "mc-sub-meta", "Submitted " + mcFormatTime(s.receivedAt) + " · event time " + (s.elapsed || "—")));
+
+    const answers = document.createElement("dl");
+    answers.className = "mc-answers";
+    Object.keys(s.answers || {}).forEach((key) => {
+      answers.appendChild(mcEl("dt", "", key));
+      const dd = document.createElement("dd");
+      mcRenderAnswer(dd, s.answers[key]);
+      answers.appendChild(dd);
+    });
+    card.appendChild(answers);
+
+    if (!rubric) {
+      card.appendChild(mcEl("div", "mc-sub-meta", "Mission 1 is scored automatically. Nothing to grade."));
+      list.appendChild(card);
+      return;
+    }
+
+    if (mcRole === "owner" && entries.length) {
+      card.appendChild(mcEl("div", "mc-sub-meta", "Judges: " + entries.map((e) => (e.judge || "?") + " " + e.total).join(" · ")));
+    }
+
+    const inputs = [];
+    const totalEl = mcEl("div", "mc-rubric-total");
+    const updateTotal = () => {
+      const sum = inputs.reduce((acc, input) => acc + (Number.isFinite(Number(input.value)) && input.value !== "" ? Number(input.value) : 0), 0);
+      totalEl.textContent = "Your total: " + round2(sum) + " / 10";
+    };
+    rubric.forEach((c) => {
+      const row = mcEl("label", "mc-crit-row");
+      row.append(mcEl("span", "mc-crit-label", c.label + " (0–" + c.max + ")"), mcEl("span", "mc-crit-hint", c.hint));
+      const input = document.createElement("input");
+      input.type = "number"; input.min = "0"; input.max = String(c.max); input.step = "0.5";
+      input.className = "mc-score mc-crit"; input.placeholder = "0–" + c.max;
+      input.dataset.sid = s.submissionId; input.dataset.crit = c.id;
+      input.setAttribute("aria-label", c.label + " out of " + c.max);
+      if (mine && mine.criteria && mine.criteria[c.id] !== undefined) { input.value = mine.criteria[c.id]; input.defaultValue = String(mine.criteria[c.id]); }
+      const draft = drafts[s.submissionId + "|" + c.id];
+      if (draft !== undefined) input.value = draft;
+      input.addEventListener("input", updateTotal);
+      inputs.push(input);
+      row.appendChild(input);
+      card.appendChild(row);
+    });
+    card.appendChild(totalEl);
+    updateTotal();
+
+    const review = mcEl("div", "mc-review");
+    const save = mcEl("button", "mc-btn approve", mine ? "Update my scores" : "Save my scores");
+    save.type = "button";
+    save.addEventListener("click", () => {
+      if (!mcJudgeName) { mcSetError("Enter your name on the sign-in screen before scoring."); return; }
+      const criteria = {};
+      inputs.forEach((input) => { criteria[input.dataset.crit] = input.value; });
+      save.disabled = true;
+      mcApi({ action: "saveScores", key: mcKey, submissionId: s.submissionId, judge: mcJudgeName, criteria: criteria })
+        .then((data) => { if (!data || !data.ok) throw new Error((data && data.error) || "Failed"); mcSetData(data); mcSetError(""); mcRender(); })
+        .catch((error) => { mcSetError(error.message === "denied" ? "You no longer have access to this event." : (error.message || "Could not save scores.")); save.disabled = false; });
+    });
+    review.appendChild(save);
+    card.appendChild(review);
+    list.appendChild(card);
+  });
+
+  if (focusedId) {
+    const again = Array.from(list.querySelectorAll("input.mc-crit")).find((i) => i.dataset.sid + "|" + i.dataset.crit === focusedId);
+    if (again) again.focus();
+  }
+}
+
+/* Owner-only controls: minimum judges, judge password and the final publish. */
+function mcRenderJudging() {
+  const panel = document.getElementById("mc-judging");
+  panel.hidden = !FIREBASE_ON || mcRole !== "owner";
+  if (panel.hidden) return;
+  const minInput = document.getElementById("mc-min-judges");
+  if (document.activeElement !== minInput) minInput.value = mcMinJudges();
+  const progress = mcGradingProgress();
+  document.getElementById("mc-judging-status").textContent =
+    progress.graded + " of " + progress.gradeable + " scored submissions have at least " + mcMinJudges() + " judge" + (mcMinJudges() === 1 ? "" : "s") + ". " +
+    (mcData.publishedAt ? "Last published " + new Date(Number(mcData.publishedAt)).toLocaleTimeString() + ". Publish again after any score change." : "Nothing is published yet: teams and the leaderboard see no scores.");
+}
+
+function mcApplyRole() {
+  const judge = mcRole === "judge";
+  document.getElementById("mc-owner-sections").hidden = judge;
+  document.getElementById("mc-stats").hidden = judge;
+  if (FIREBASE_ON) {
+    ["mc-import", "mc-event-banner", "mc-stop"].forEach((id) => { document.getElementById(id).hidden = judge; });
+  }
+  mcRenderJudging();
+}
+
+function mcOwnerAction(body, buttonId, messageId, doneText) {
+  const button = document.getElementById(buttonId);
+  const msg = document.getElementById(messageId);
+  button.disabled = true;
+  msg.textContent = "Working…";
+  return mcApi(Object.assign({ key: mcKey }, body))
+    .then((data) => {
+      if (!data || !data.ok) throw new Error((data && data.error) || "Failed");
+      mcSetData(data);
+      mcRender();
+      msg.textContent = typeof doneText === "function" ? doneText(data) : doneText;
+    })
+    .catch((error) => { msg.textContent = error.message === "denied" ? "Only the event owner can do that." : (error.message || "Failed."); })
+    .finally(() => { button.disabled = false; });
+}
+
+document.getElementById("mc-min-save").addEventListener("click", () => {
+  mcOwnerAction({ action: "setMinJudges", value: document.getElementById("mc-min-judges").value }, "mc-min-save", "mc-publish-msg", "Minimum judges saved. Publish again to apply it.");
+});
+document.getElementById("mc-judge-pass-save").addEventListener("click", () => {
+  const box = document.getElementById("mc-judge-pass");
+  mcOwnerAction({ action: "setJudgeAccess", password: box.value }, "mc-judge-pass-save", "mc-judge-pass-msg",
+    "Judge password saved. Share it with your judges; they sign in with the event code, this password and their name.")
+    .then(() => { box.value = ""; });
+});
+document.getElementById("mc-publish").addEventListener("click", () => {
+  const progress = mcGradingProgress();
+  const left = progress.gradeable - progress.graded;
+  const question = "Publish results to every team and the leaderboard?\n\n" + progress.graded + " of " + progress.gradeable +
+    " scored submissions have the required " + mcMinJudges() + " judge(s)." +
+    (left ? "\n" + left + " will be left off until they have enough scores and you publish again." : "") +
+    "\n\nYou can edit scores and publish again at any time.";
+  if (!confirm(question)) return;
+  mcOwnerAction({ action: "publish" }, "mc-publish", "mc-publish-msg", (data) =>
+    "Published at " + new Date().toLocaleTimeString() + ": " + (data.publishInfo ? data.publishInfo.included + " scored submissions included, " + data.publishInfo.skipped + " left off." : "done."));
+});
+
 function mcRenderSubmissions() {
+  if (FIREBASE_ON) { mcRenderSubmissionsCloud(); return; }
+
   const list = document.getElementById("mc-submissions");
   // Keep scores typed but not yet saved (and the focused field) across the periodic refresh.
   const drafts = {};
@@ -2751,13 +3221,14 @@ function mcOpenDashboard(password, data) {
   document.getElementById("mc-gate-error").textContent = "";
   document.getElementById("mc-gate").hidden = true;
   document.getElementById("mc-dashboard").hidden = false;
-  mcData = { teams: data.teams || [], submissions: data.submissions || [] };
+  mcSetData(data);
   document.getElementById("mc-updated").textContent = "Updated " + new Date().toLocaleTimeString();
   mcRender();
   if (FIREBASE_ON) {
     mcRenderStopState(!!data.stopped);
     document.getElementById("mc-event-banner").hidden = false;
   }
+  mcApplyRole();
   clearInterval(mcTimerId);
   mcTimerId = setInterval(mcRefresh, FIREBASE_ON ? 8000 : 20000);
 }
@@ -2766,6 +3237,8 @@ document.getElementById("mc-create").addEventListener("click", async () => {
   const input = document.getElementById("mc-password");
   const error = document.getElementById("mc-gate-error");
   if (input.value.length < 6) { error.textContent = "Choose a password of at least 6 characters."; return; }
+  mcRole = "owner";
+  mcJudgeName = document.getElementById("mc-judge-name").value.trim() || "Lead facilitator";
   const buttons = document.querySelectorAll("#mc-gate button");
   buttons.forEach((b) => { b.disabled = true; });
   error.textContent = "Creating event…";
@@ -2792,13 +3265,21 @@ document.getElementById("mc-create").addEventListener("click", async () => {
 
 document.getElementById("mc-gate").addEventListener("submit", (event) => {
   event.preventDefault();
+  mcUnlock("owner");
+});
+
+function mcUnlock(role) {
   const input = document.getElementById("mc-password");
   const error = document.getElementById("mc-gate-error");
   const button = document.getElementById("mc-unlock");
   if (!FIREBASE_ON && !crypto.subtle) { error.textContent = "This browser blocks the password check. Open the page over https or in a current Chrome/Edge/Firefox."; return; }
+  mcRole = role;
   if (FIREBASE_ON) {
     const code = normalizeEventCode(document.getElementById("mc-gate-event").value);
     if (!code) { error.textContent = "Enter your event code, or press “Create a new event”."; return; }
+    const name = document.getElementById("mc-judge-name").value.trim();
+    if (role === "judge" && !name) { error.textContent = "Enter your name so your scores are labelled."; return; }
+    mcJudgeName = name || (role === "owner" ? "Lead facilitator" : "");
     localStorage.setItem(MC_EVENT_KEY, code);
     document.getElementById("mc-event-code").value = code;
     fbState.auth = null;
@@ -2810,16 +3291,34 @@ document.getElementById("mc-gate").addEventListener("submit", (event) => {
     if (data && data.code === "weak") { error.textContent = data.error; return; }
     if (!data || !data.ok) { error.textContent = "The server could not process the request."; return; }
     mcOpenDashboard(input.value, data);
-  }).catch(() => {
-    error.textContent = FIREBASE_ON ? "Could not reach the server. Check the connection and try again." : "Could not open mission control. Try again.";
+  }).catch((err) => {
+    error.textContent = err && err.code === "denied" && role === "judge"
+      ? "Judge access isn't set up for this event yet. Ask the event owner to set a judge password."
+      : FIREBASE_ON ? "Could not reach the server. Check the connection and try again." : "Could not open mission control. Try again.";
   }).finally(() => { button.disabled = false; });
-});
+}
+document.getElementById("mc-judge-signin").addEventListener("click", () => mcUnlock("judge"));
 document.getElementById("mc-refresh").addEventListener("click", mcRefresh);
 (function setupMissionControlMode() {
   if (FIREBASE_ON) {
     document.getElementById("mc-cloud-fields").hidden = false;
+    document.getElementById("mc-judge-fields").hidden = false;
+    document.getElementById("mc-judge-signin").hidden = false;
     document.getElementById("mc-create").hidden = false;
     document.getElementById("mc-import").hidden = false;
+    const filterButtons = document.querySelectorAll("#mc-filters .mc-btn");
+    const filterLabels = [["todo", "To score"], ["done", "Scored by me"], [null, null], ["all", "All"]];
+    filterButtons.forEach((button, i) => {
+      if (!filterLabels[i][0]) { button.hidden = true; return; }
+      button.dataset.filter = filterLabels[i][0];
+      button.textContent = filterLabels[i][1];
+    });
+    mcFilter = "todo";
+    document.getElementById("mc-scores-note").textContent =
+      "Average of every judge's scores, out of 10, with the number of judges (j). Held here until you publish; teams and the leaderboard don't see them yet.";
+    document.querySelector('label[for="mc-password"]').textContent = "Facilitator password (owners) or judge password (judges)";
+    document.getElementById("mc-judge-name").value = localStorage.getItem("geoops-judge-name-v1") || "";
+    document.getElementById("mc-judge-name").addEventListener("change", (e) => localStorage.setItem("geoops-judge-name-v1", e.target.value.trim()));
     document.querySelector('label[for="mc-event-code"]').hidden = true;
     document.getElementById("mc-event-code").hidden = true;
     document.getElementById("mc-import-btn").addEventListener("click", async () => {
@@ -2991,16 +3490,49 @@ function renderFinishScreen() {
       '<div class="finish-splits">' + splits + '</div>' +
       '<div class="finish-status"><b>' + done + ' of ' + MISSIONS.length + ' missions submitted</b>' +
         '<span id="finish-delivery">' + finishDeliveryText() + '</span></div>' +
+      '<div class="finish-results" id="finish-results" hidden></div>' +
       '<button class="start-btn" id="finish-board-btn" type="button">View live leaderboard</button>' +
     '</div>';
   root.querySelector(".finish-title").textContent = "Nailed it, " + teamName + "!";
   document.getElementById("finish-board-btn").addEventListener("click", () => showRoute("command-display"));
 }
 
+function renderTeamResults(entry) {
+  const box = document.getElementById("finish-results");
+  if (!box || !entry || !entry.missions) return;
+  const missions = entry.missions;
+  let quality = 0;
+  let html = '<h3 class="finish-results-title">Your scores are in</h3>';
+  Object.keys(RUBRICS).forEach((n) => {
+    const m = missions[n];
+    if (!m) return;
+    quality += Number(m.total) || 0;
+    html += '<div class="finish-crit total"><span>Mission ' + n + '</span><b>' + round2(Number(m.total) || 0) + ' / 10</b></div>';
+    RUBRICS[n].forEach((c) => {
+      const v = m.criteria && m.criteria[c.id];
+      html += '<div class="finish-crit"><span>' + c.label + '</span><b>' + (v === undefined ? "—" : round2(Number(v)) + " / " + c.max) + '</b></div>';
+    });
+  });
+  html += '<div class="finish-crit total"><span>Quality total</span><b>' + round2(quality) + ' / 40</b></div>' +
+    '<p class="finish-copy">Averaged across all judges. Final leaderboard rank also counts your time.</p>';
+  box.innerHTML = html;
+  box.hidden = false;
+}
+
+function fetchTeamResults() {
+  if (!FIREBASE_ON || !eventCode || !teamName) return;
+  fetch(fbUrl("events/" + encodeURIComponent(eventCode) + "/published/" + teamKey(teamName)) + "?t=" + Date.now(), { cache: "no-store" })
+    .then(fbJson).then((entry) => { if (entry) renderTeamResults(entry); }).catch(() => {});
+}
+
 let finishRefreshId = null;
+let finishResultsId = null;
 function enterFinishMode() {
   if (!finishedAt || !eventStartTime) return;
   renderFinishScreen();
+  fetchTeamResults();
+  clearInterval(finishResultsId);
+  finishResultsId = setInterval(fetchTeamResults, 15000);
   showRoute("field-analyst");
   window.scrollTo({ top: 0, behavior: "smooth" });
   clearInterval(finishRefreshId);

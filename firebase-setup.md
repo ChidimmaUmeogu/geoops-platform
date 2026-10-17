@@ -36,10 +36,21 @@ Realtime Database → **Rules** → replace everything with this, then **Publish
           ".write": "auth != null && !data.exists() && newData.val() === auth.uid"
         },
         "meta": { ".read": true },
+        "published": { ".read": true },
         "submissions": {
+          ".read": "auth != null && root.child('events').child($event).child('judges').child(auth.uid).val() === true",
           "$id": {
             ".write": "!data.exists() && newData.exists() && root.child('events').child($event).child('meta').exists()",
             ".validate": "newData.hasChildren(['teamName', 'mission', 'answers']) && newData.child('teamName').isString() && newData.child('teamName').val().length < 80"
+          }
+        },
+        "scores": {
+          ".read": "auth != null && root.child('events').child($event).child('judges').child(auth.uid).val() === true",
+          "$sid": {
+            "$judge": {
+              ".write": "auth != null && root.child('events').child($event).child('judges').child(auth.uid).val() === true",
+              ".validate": "newData.hasChildren(['judge', 'criteria', 'total'])"
+            }
           }
         },
         "checkins": {
@@ -58,7 +69,10 @@ What the rules do:
 - The first account to claim an event code becomes its owner. Only the owner can read all data, approve,
   reject or verify teams. The owner's password is the facilitator password.
 - Teams can add one submission or check-in to an existing event, and cannot read or change anything.
-- Anyone with the event code can read the approved scores (no answers) for the Command Display.
+- Anyone with the event code can read the approved scores (no answers) for the Command Display, and the
+  published rubric breakdowns (averaged per team) that appear on each team's finish page.
+- Judges: the owner sets a shared judge password in Mission Control. Judges sign in with their own name,
+  can read submissions and write only their own scores. Scores stay private until the owner presses **Publish results**.
 - Event codes are random (for example `KRT-4821`), so nobody can claim an event meant for someone else.
 
 ## 5. Paste the config into the page
@@ -77,7 +91,10 @@ GitHub Pages) and share the link.
 ## Running an event
 1. Facilitator: Mission Control → choose a password (6+ characters) → **Create a new event**. Share the event code shown.
 2. Teams: type the event code and pick their team.
-3. Facilitator: review and approve in Mission Control. Open the Command Display in the same browser.
+3. Facilitator: Mission Control → set a judge password and the minimum judges per submission. Judges sign in with
+   the judge password and their name, then score each submission by rubric. The owner scores too.
+4. When everyone is done, the owner presses **Publish results**. Edit scores and publish again to correct anything.
+   Open the Command Display in the same browser.
 4. Next time, enter the event code and password to reopen the same event on any device.
 
 ## Limits worth knowing
