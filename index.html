@@ -296,6 +296,18 @@
   .time-up-overlay h2 { font-family: 'Space Grotesk', sans-serif; color: #C97A2B; font-size: 24px; margin-bottom: 10px; }
   .time-up-overlay p { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #9BA592; max-width: 44ch; }
 
+  /* ---- Finish screen ---- */
+  .finish-card { border: 1px solid rgba(201,122,43,0.45); background: rgba(8,27,20,0.9); padding: 30px 22px; margin: 18px 0; text-align: center; }
+  .finish-tag { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #6FA37B; }
+  .finish-title { font-family: 'Space Grotesk', sans-serif; font-size: 28px; color: #F2EFE4; margin: 10px 0 4px; }
+  .finish-time { font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 40px; color: #C97A2B; margin: 8px 0 14px; }
+  .finish-copy { font-size: 14.5px; line-height: 1.6; color: #C8C6BA; max-width: 52ch; margin: 0 auto 12px; }
+  .finish-splits { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 22px 0 16px; }
+  .finish-split { min-width: 84px; border: 1px solid rgba(233,228,213,0.15); padding: 8px 10px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #9BA592; }
+  .finish-split b { display: block; font-size: 13px; color: #F2EFE4; margin-top: 3px; }
+  .finish-status { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9BA592; margin-bottom: 20px; }
+  .finish-status b { display: block; color: #E9E4D5; margin-bottom: 4px; }
+
   /* ---- Data source tools (M2/M3) ---- */
   .tool-block { border: 1px solid rgba(233,228,213,0.15); background: rgba(233,228,213,0.02); padding: 16px; margin-bottom: 18px; }
   .tool-label { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #6E7A66; margin-bottom: 10px; }
@@ -877,6 +889,7 @@
 
   <div class="tabs" id="tabs" style="display:none;"></div>
   <div id="mission-panels" style="display:none;"></div>
+  <div id="finish-screen" style="display:none;"></div>
 </div>
 
 <script>
@@ -1063,6 +1076,8 @@ function normalizeEventCode(value) {
 }
 let eventDeadline = null;
 let timeUpShown = false;
+let missionDoneAt = {}; // mission number -> time its first submission was logged
+let finishedAt = null;  // set when Mission 5 is submitted; locks the team out of the missions
 
 function saveSession() {
   if (!teamName || !eventDeadline) return;
@@ -1074,7 +1089,9 @@ function saveSession() {
       eventDeadline: eventDeadline,
       unlockedIndex: unlockedIndex,
       completed: completed,
-      activeIndex: activeIndex
+      activeIndex: activeIndex,
+      missionDoneAt: missionDoneAt,
+      finishedAt: finishedAt
     }));
   } catch (error) {
   }
@@ -1094,6 +1111,8 @@ function restoreSession() {
     unlockedIndex = Math.min(saved.unlockedIndex || 0, MISSIONS.length - 1);
     completed = saved.completed || {};
     activeIndex = Math.min(saved.activeIndex || 0, unlockedIndex);
+    missionDoneAt = saved.missionDoneAt || {};
+    finishedAt = saved.finishedAt || null;
     return true;
   } catch (error) {
     localStorage.removeItem(SESSION_STORAGE_KEY);
@@ -1224,6 +1243,11 @@ function logSubmission(mission, answers, statusElId) {
     receivedAt: Date.now(),
     answers: answers 
   }; 
+  const missionNum = missionIndexOf(mission);
+  if (missionNum && !missionDoneAt[missionNum]) {
+    missionDoneAt[missionNum] = payload.receivedAt;
+    saveSession();
+  }
   try {
     const saved = JSON.parse(localStorage.getItem(RESULTS_STORAGE_KEY) || "[]");
     saved.push(payload);
@@ -1418,6 +1442,8 @@ function resetSavedSession() {
   unlockedIndex = 0;
   completed = {};
   activeIndex = 0;
+  missionDoneAt = {};
+  finishedAt = null;
   m1Answers = {};
   Object.keys(missionCheckinsSent).forEach((k) => delete missionCheckinsSent[k]);
   applyEventStopState(false);
@@ -1974,6 +2000,9 @@ function buildMission5Content() {
     completed["m5"] = true;
     renderTabs();
     renderProgress();
+    finishedAt = missionDoneAt[5] || Date.now();
+    saveSession();
+    enterFinishMode();
     document.getElementById("m5-resend").addEventListener("click", () => {
       logSubmission("Mission 5 — Tell the Story",
         { policyBrief: brief, fieldReport: report, policyBriefWordCount: countWords(brief), fieldReportWordCount: countWords(report) },
@@ -2918,6 +2947,67 @@ function startSessionNow() {
   tickEventClock();
   clockId = setInterval(tickEventClock, 1000);
   startEventStopPolling();
+  if (finishedAt) enterFinishMode();
+}
+
+/* ============================================================
+   Finish screen (after Mission 5)
+   ============================================================ */
+function formatDuration(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+  return (h ? h + "h " : "") + (h || m ? m + "m " : "") + s + "s";
+}
+
+function finishDeliveryText() {
+  if (!FIREBASE_ON) return "Saved on this device. Hand your result codes to your facilitator.";
+  let pending = 0;
+  try { pending = JSON.parse(localStorage.getItem(SUBMISSION_QUEUE_KEY) || "[]").length; } catch (error) { /* treat as none */ }
+  return pending
+    ? "Still syncing. It will send automatically once you're online. Keep this page open."
+    : "✓ Delivered to your facilitator.";
+}
+
+function renderFinishScreen() {
+  const root = document.getElementById("finish-screen");
+  const total = formatDuration(finishedAt - eventStartTime);
+  const done = MISSIONS.filter((m, i) => missionDoneAt[i + 1]).length;
+  let prev = eventStartTime;
+  const splits = MISSIONS.map((m, i) => {
+    const at = missionDoneAt[i + 1];
+    const text = at ? formatDuration(at - prev) : "—";
+    if (at) prev = at;
+    return '<div class="finish-split"><span>M' + (i + 1) + '</span><b>' + text + '</b></div>';
+  }).join("");
+  root.innerHTML =
+    '<div class="finish-card">' +
+      '<div class="finish-tag">Mission complete</div>' +
+      '<h2 class="finish-title"></h2>' +
+      '<div class="finish-time">' + total + '</div>' +
+      '<p class="finish-copy">That\'s your total time, from the moment you hit start to your final submission. ' +
+        'Five missions, a lot of squinting at satellite imagery, and you still made it to the story.</p>' +
+      '<p class="finish-copy">Your facilitators are about to read every word. Final scores land on the leaderboard once judging is done. ' +
+        'Until then: stretch, hydrate, and brag responsibly.</p>' +
+      '<div class="finish-splits">' + splits + '</div>' +
+      '<div class="finish-status"><b>' + done + ' of ' + MISSIONS.length + ' missions submitted</b>' +
+        '<span id="finish-delivery">' + finishDeliveryText() + '</span></div>' +
+      '<button class="start-btn" id="finish-board-btn" type="button">View live leaderboard</button>' +
+    '</div>';
+  root.querySelector(".finish-title").textContent = "Nailed it, " + teamName + "!";
+  document.getElementById("finish-board-btn").addEventListener("click", () => showRoute("command-display"));
+}
+
+let finishRefreshId = null;
+function enterFinishMode() {
+  if (!finishedAt || !eventStartTime) return;
+  renderFinishScreen();
+  showRoute("field-analyst");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  clearInterval(finishRefreshId);
+  finishRefreshId = setInterval(() => {
+    const el = document.getElementById("finish-delivery");
+    if (el) el.textContent = finishDeliveryText();
+  }, 3000);
 }
 
 function showRoute(route) {
@@ -2940,7 +3030,10 @@ function showRoute(route) {
   document.body.classList.toggle("not-home", route !== "home");
   if (route !== "mission-control" && typeof lockMissionControl === "function") lockMissionControl();
   if (route === "command-display") refreshPublicLeaderboard();
-  const showMissions = route === "field-analyst" && started;
+  const showFinish = route === "field-analyst" && started && !!finishedAt;
+  const showMissions = route === "field-analyst" && started && !finishedAt;
+  const finishEl = document.getElementById("finish-screen");
+  if (finishEl) finishEl.style.display = showFinish ? "block" : "none";
   const tabsEl = document.getElementById("tabs");
   const panelsEl = document.getElementById("mission-panels");
   if (tabsEl) tabsEl.style.display = showMissions ? "flex" : "none";
