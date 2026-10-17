@@ -7,6 +7,7 @@
 <link rel="icon" type="image/svg+xml" sizes="64x64" href="geoops_favicon.svg" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
   * { box-sizing: border-box; }
@@ -803,6 +804,7 @@
         <div class="mc-toolbar">
           <div class="mc-updated" id="mc-updated">Not yet loaded</div>
           <div class="mc-actions">
+            <button class="mc-btn reject" id="mc-stop" type="button" hidden>Stop event</button>
             <button class="mc-btn" id="mc-refresh" type="button">Refresh</button>
             <button class="mc-btn" id="mc-lock" type="button">Lock</button>
           </div>
@@ -813,6 +815,7 @@
 
         <div id="mc-import">
           <h2 class="mc-heading">Import team results</h2>
+          <div class="mc-updated">Teams whose results did not arrive can give you their result code. Paste it below to add it to this event.</div>
           <label class="field-label-sm" for="mc-event-code">Your event code (share it with your teams; only matching results are imported)</label>
           <input class="mc-input" id="mc-event-code" type="text" maxlength="30" placeholder="e.g. ABUJA-2026" style="text-transform:uppercase;" />
           <div class="mc-updated" style="margin-top:10px;">Paste one or more result codes from teams (Mission 1 to 5). Duplicates are ignored.</div>
@@ -826,8 +829,20 @@
         <h2 class="mc-heading">Teams</h2>
         <div class="mc-table-wrap">
           <table class="mc-table">
-            <thead><tr><th>Team</th><th>Checked in</th><th>Submissions</th><th>Verified</th></tr></thead>
+            <thead><tr><th>Team</th><th>Checked in · M1</th><th>M2</th><th>M3</th><th>M4</th><th>M5</th><th>Submissions</th><th>Verified</th></tr></thead>
             <tbody id="mc-teams"></tbody>
+          </table>
+        </div>
+
+        <h2 class="mc-heading">Scores by mission</h2>
+        <div class="mc-updated">Facilitator scores out of 10. Only approved submissions carry a score; rejected and pending ones are marked.</div>
+        <div class="mc-actions" style="margin:8px 0;">
+          <button class="mc-btn" id="mc-download" type="button">Download Excel</button>
+        </div>
+        <div class="mc-table-wrap">
+          <table class="mc-table">
+            <thead><tr><th>Team</th><th>M1</th><th>M2</th><th>M3</th><th>M4</th><th>M5</th><th>Total</th></tr></thead>
+            <tbody id="mc-scores"></tbody>
           </table>
         </div>
 
@@ -1326,6 +1341,7 @@ function showMission(i) {
     b.classList.toggle("active", idx === i);
   });
   if (i === 0) setTimeout(initMission1Maps, 30);
+  cloudCheckin(i + 1);
 }
 
 function unlockNext(fromIndex) {
@@ -1336,6 +1352,10 @@ function unlockNext(fromIndex) {
   renderTabs();
   renderProgress();
   saveSession();
+  if (fromIndex < MISSIONS.length - 1) {
+    showMission(fromIndex + 1);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 }
 
 /* ============================================================
@@ -1358,6 +1378,27 @@ function tickEventClock() {
     showTimeUp();
   }
 }
+/* The facilitator's stop flag lives at events/<code>/meta/stoppedAt, which teams may read. */
+function applyEventStopState(stopped) {
+  const existing = document.getElementById("event-stop-overlay");
+  if (!stopped) { if (existing) existing.remove(); return; }
+  if (existing) return;
+  const overlay = document.createElement("div");
+  overlay.id = "event-stop-overlay";
+  overlay.className = "time-up-overlay";
+  overlay.innerHTML =
+    '<h2>Event stopped</h2>' +
+    '<p>Your facilitator has stopped the event. Please stop working and wait for instructions.</p>';
+  document.body.appendChild(overlay);
+}
+function pollEventStop() {
+  if (!FIREBASE_ON || !eventCode) return;
+  fetch(fbUrl("events/" + encodeURIComponent(eventCode) + "/meta/stoppedAt"))
+    .then(fbJson)
+    .then((value) => applyEventStopState(!!value))
+    .catch(() => {});
+}
+
 function showTimeUp() {
   if (timeUpShown) return;
   timeUpShown = true;
@@ -1424,26 +1465,26 @@ const PATCHES = [
   {
     lat: 5.4589, lng: 8.3522, zoom: 16,
     correctLabel: "intact",
-    explanation: "Verified together via screenshot — uniform dark-green canopy, no texture breaks, away from any river or road access. This is our confirmed stable reference point.",
+    explanation: "",
     verified: true
   },
   {
     lat: 4.9518, lng: 8.3220, zoom: 14,
     correctLabel: "water",
-    explanation: "PLACEHOLDER — approximate Calabar/Cross River estuary area. Confirm in Google Maps before use.",
-    verified: false
+    explanation: "",
+    verified: true
   },
   {
     lat: 5.10, lng: 8.32, zoom: 15,
     correctLabel: "disturbed",
-    explanation: "PLACEHOLDER — approximate area near known oil palm estates south of Akamkpa (Schoneveld 2014, Fig. 2). Confirm visually before use.",
-    verified: false
+    explanation: "",
+    verified: true
   },
   {
     lat: 5.30, lng: 8.40, zoom: 15,
     correctLabel: "unclear",
     explanation: "",
-    verified: false
+    verified: true
   }
 ];
 const TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
@@ -1475,7 +1516,7 @@ function buildMission1Content() {
     bar.className = "patch-label-bar";
     const idx = document.createElement("div");
     idx.className = "patch-index";
-    idx.textContent = "Patch " + (index + 1) + (patch.verified ? "" : " (unverified placeholder)");
+    idx.textContent = "Patch " + (index + 1);
     bar.appendChild(idx);
 
     const row = document.createElement("div");
@@ -1535,35 +1576,23 @@ function initMission1Maps() {
 function submitMission1() {
   m1Submitted = true;
   let correct = 0;
+  const graded = PATCHES.length;
+  // Correctness is never shown to teams; the score only goes to the facilitator.
   PATCHES.forEach((patch, index) => {
-    const chosen = m1Answers[index];
-    const isCorrect = chosen === patch.correctLabel;
-    if (isCorrect) correct++;
-    const fb = document.getElementById("m1-feedback-" + index);
-    fb.classList.add(isCorrect ? "correct" : "incorrect");
-    fb.innerHTML =
-      '<span class="feedback-tag">' + (isCorrect ? "Matches the facilitator's read" : "Facilitator read this differently") + '</span>' +
-      patch.explanation;
+    if (m1Answers[index] === patch.correctLabel) correct++;
   });
-
-  const pct = Math.round((correct / PATCHES.length) * 100);
-  let tier, message;
-  if (pct >= 75) { tier = "Strong eye"; message = "You're reading these patches close to how the facilitator read them. That's the literacy the rest of the missions build on."; }
-  else if (pct >= 40) { tier = "Getting there"; message = "Some reads matched, some didn't — normal on a first pass. Check where you and the facilitator disagreed."; }
-  else { tier = "Keep practicing"; message = "This is why Mission 1 isn't timed or scored competitively. Go through each explanation before moving on."; }
 
   const slot = document.getElementById("m1-summary-slot");
   slot.innerHTML =
     '<div class="summary-panel">' +
-      '<div class="summary-tag">' + tier + '</div>' +
-      '<div class="summary-body">' + message + '</div>' +
-      '<div class="summary-score">' + correct + ' / ' + PATCHES.length + ' matched the facilitator\'s read</div>' +
+      '<div class="summary-tag">Answers submitted</div>' +
+      '<div class="summary-body">Your readings have been recorded for your facilitator, who will go through them with you.</div>' +
       '<div id="m1-send-status" style="margin-top:10px;"></div>' +
       '<button class="continue-btn" id="m1-continue">Continue to Mission 2</button>' +
     '</div>';
   document.getElementById("m1-submit").style.display = "none";
   logSubmission("Mission 1 — Reading the Signal",
-    { score: correct + "/" + PATCHES.length, patchReads: m1Answers },
+    { score: correct + "/" + graded, patchReads: m1Answers },
     "m1-send-status");
   document.getElementById("m1-continue").addEventListener("click", () => unlockNext(0));
 }
@@ -2055,6 +2084,43 @@ function mcImportCodes(text) {
   return { added: added, duplicate: duplicate, invalid: invalid, wrongEvent: wrongEvent, found: codes.length };
 }
 
+/* Cloud mode: pushes pasted result codes into the event as the owner. Existing ids are skipped. */
+async function mcImportCodesCloud(text) {
+  const codes = String(text || "").match(/GEOOPS1\.[A-Za-z0-9_-]+/g) || [];
+  const event = normalizeEventCode(localStorage.getItem(MC_EVENT_KEY));
+  const known = new Set(mcData.submissions.map((s) => s.submissionId));
+  const teamsByName = {};
+  mcData.teams.forEach((t) => { teamsByName[t.teamName] = t; });
+  const token = await fbToken();
+  if (!token) throw new Error("Session expired. Lock and re-open Mission Control.");
+  const base = "events/" + encodeURIComponent(event);
+  const result = { added: 0, duplicate: 0, invalid: 0, wrongEvent: 0, found: codes.length };
+  for (const code of codes) {
+    const item = decodeResultCode(code);
+    if (!item || TEAM_NAMES.indexOf(item.teamName) === -1 || !/^[A-Za-z0-9_-]{8,64}$/.test(String(item.submissionId))) { result.invalid += 1; continue; }
+    if (normalizeEventCode(item.eventCode) !== event) { result.wrongEvent += 1; continue; }
+    if (known.has(item.submissionId)) { result.duplicate += 1; continue; }
+    const payload = {
+      submissionId: String(item.submissionId), teamName: item.teamName, eventCode: event,
+      mission: String(item.mission), elapsed: String(item.elapsed || ""),
+      receivedAt: Number(item.receivedAt) || Date.now(), answers: item.answers
+    };
+    await fetch(fbUrl(base + "/submissions/" + payload.submissionId, token), { method: "PUT", body: JSON.stringify(payload) }).then(fbJson);
+    known.add(payload.submissionId);
+    const missionNum = missionIndexOf(payload.mission);
+    const team = teamsByName[item.teamName] || {};
+    const hasCheckin = missionNum === 1 ? team.checkedInAt : (team.missionCheckins || {})[missionNum];
+    if (missionNum >= 1 && !hasCheckin) {
+      const key = teamKey(item.teamName) + (missionNum > 1 ? "_M" + missionNum : "");
+      await fetch(fbUrl(base + "/checkins/" + key, token), {
+        method: "PUT", body: JSON.stringify({ teamName: item.teamName, mission: missionNum, at: payload.receivedAt })
+      }).then(fbJson);
+    }
+    result.added += 1;
+  }
+  return result;
+}
+
 function refreshLocalLeaderboard() {
   const approved = mcLocalLoad().submissions.filter((s) => s.status === "approved");
   window.setGeoOpsLeaderboardData(buildLeaderboardEntries(approved));
@@ -2175,6 +2241,10 @@ function cloudApi(body) {
         ? { teamName: sub.teamName, mission: sub.mission, elapsed: sub.elapsed || "", score: score }
         : null;
       write = fetch(fbUrl(base, token), { method: "PATCH", body: JSON.stringify(update) }).then(fbJson);
+    } else if (body.action === "setStopped") {
+      write = fetch(fbUrl(base + "/meta/stoppedAt", token), {
+        method: "PUT", body: JSON.stringify(body.stopped === true ? Date.now() : null)
+      }).then(fbJson);
     } else if (body.action !== "list") {
       return { ok: false, error: "Unknown action." };
     }
@@ -2185,9 +2255,15 @@ function cloudApi(body) {
       const reviews = data.reviews || {};
       const teams = TEAM_NAMES.map((name) => {
         const key = teamKey(name);
+        const missionCheckins = {};
+        for (let n = 1; n <= MISSIONS.length; n += 1) {
+          const entry = checkins[key + (n > 1 ? "_M" + n : "")];
+          if (entry && entry.at) missionCheckins[n] = entry.at;
+        }
         return {
           teamName: name,
           checkedInAt: checkins[key] ? checkins[key].at : null,
+          missionCheckins: missionCheckins,
           verified: !!(verified[key] && verified[key].verified),
           verifiedAt: verified[key] ? verified[key].at : null
         };
@@ -2200,7 +2276,7 @@ function cloudApi(body) {
           answers: s.answers || {}, status: r.status || "pending", score: r.score === undefined ? null : r.score, reviewedAt: r.at || null
         };
       });
-      return { ok: true, teams: teams, submissions: submissions };
+      return { ok: true, teams: teams, submissions: submissions, stopped: !!(data.meta && data.meta.stoppedAt) };
     });
   }).catch((error) => {
     if (error && error.code === "denied") return { ok: false, code: "unauthorized", error: "This password does not control that event." };
@@ -2208,11 +2284,18 @@ function cloudApi(body) {
   });
 }
 
-function cloudCheckin() {
+/* Records the first time a team opens each mission. Mission 1 keeps the original key; later
+   missions use "<team>_M2" etc. Rules make check-ins create-only, so repeats are harmless. */
+const missionCheckinsSent = {};
+function cloudCheckin(missionNum) {
   if (!FIREBASE_ON || !teamName || !eventCode) return;
-  fetch(fbUrl("events/" + encodeURIComponent(eventCode) + "/checkins/" + teamKey(teamName)), {
-    method: "PUT", body: JSON.stringify({ teamName: teamName, at: Date.now() })
-  }).catch(() => {});
+  const mission = missionNum || 1;
+  if (missionCheckinsSent[mission]) return;
+  missionCheckinsSent[mission] = true;
+  const key = teamKey(teamName) + (mission > 1 ? "_M" + mission : "");
+  fetch(fbUrl("events/" + encodeURIComponent(eventCode) + "/checkins/" + key), {
+    method: "PUT", body: JSON.stringify({ teamName: teamName, mission: mission, at: Date.now() })
+  }).catch(() => { missionCheckinsSent[mission] = false; });
 }
 
 let cloudFlushInFlight = false;
@@ -2334,6 +2417,33 @@ function lockMissionControl(message) {
   document.getElementById("mc-gate-error").textContent = message || "";
 }
 
+let mcStopped = false;
+function mcRenderStopState(stopped) {
+  mcStopped = stopped;
+  const btn = document.getElementById("mc-stop");
+  btn.hidden = !FIREBASE_ON;
+  btn.textContent = stopped ? "Resume event" : "Stop event";
+  const banner = document.getElementById("mc-event-banner");
+  if (FIREBASE_ON) {
+    banner.textContent = "Event code to share with your teams: " + normalizeEventCode(localStorage.getItem(MC_EVENT_KEY)) +
+      (stopped ? " — EVENT STOPPED: all teams are locked out" : "");
+  }
+}
+
+document.getElementById("mc-stop").addEventListener("click", () => {
+  const stopping = !mcStopped;
+  const question = stopping
+    ? "Stop the event for ALL teams now? Their screens lock within about 10 seconds. You can resume later."
+    : "Resume the event for all teams?";
+  if (!confirm(question)) return;
+  const btn = document.getElementById("mc-stop");
+  btn.disabled = true;
+  mcApi({ action: "setStopped", key: mcKey, stopped: stopping })
+    .then((data) => { if (!data || !data.ok) throw new Error((data && data.error) || "Failed"); mcRenderStopState(!!data.stopped); })
+    .catch((error) => mcSetError(error.message || "Could not change the event state."))
+    .finally(() => { btn.disabled = false; });
+});
+
 function mcRefresh() {
   if (!mcKey) return Promise.resolve();
   return mcApi({ action: "list", key: mcKey }).then((data) => {
@@ -2344,6 +2454,7 @@ function mcRefresh() {
     }
     if (!data || !data.ok) throw new Error((data && data.error) || "Could not load data.");
     mcData = { teams: data.teams || [], submissions: data.submissions || [] };
+    mcRenderStopState(!!data.stopped);
     mcSetError("");
     if (FIREBASE_ON) window.setGeoOpsLeaderboardData(buildLeaderboardEntries(mcData.submissions.filter((s) => s.status === "approved")));
     else refreshLocalLeaderboard();
@@ -2380,9 +2491,12 @@ function mcRender() {
     const subs = subsByTeam[name] || [];
     const row = document.createElement("tr");
     row.appendChild(mcEl("td", "", name));
-    const checkCell = document.createElement("td");
-    checkCell.appendChild(mcEl("span", "mc-pill" + (info.checkedInAt ? " ok" : ""), info.checkedInAt ? "In · " + mcFormatTime(info.checkedInAt) : "Not yet"));
-    row.appendChild(checkCell);
+    for (let n = 1; n <= MISSIONS.length; n += 1) {
+      const at = n === 1 ? info.checkedInAt : (info.missionCheckins || {})[n];
+      const cell = document.createElement("td");
+      cell.appendChild(mcEl("span", "mc-pill" + (at ? " ok" : ""), at ? mcFormatTime(at) : "—"));
+      row.appendChild(cell);
+    }
     const approvedCount = subs.filter((s) => s.status === "approved").length;
     const pendingCount = subs.filter((s) => s.status === "pending").length;
     row.appendChild(mcEl("td", "", approvedCount + " approved · " + pendingCount + " pending"));
@@ -2403,8 +2517,92 @@ function mcRender() {
     body.appendChild(row);
   });
 
+  mcRenderScores();
   mcRenderSubmissions();
 }
+
+/* Latest submission per team and mission; approved ones carry the facilitator's score. */
+function mcScoreGrid() {
+  const grid = {};
+  mcData.submissions.forEach((s) => {
+    const n = missionIndexOf(s.mission);
+    if (!s.teamName || n < 1 || n > MISSIONS.length) return;
+    const row = (grid[s.teamName] = grid[s.teamName] || {});
+    const rank = { approved: 3, pending: 2, rejected: 1 };
+    const current = row[n];
+    if (!current || rank[s.status] > rank[current.status] || (rank[s.status] === rank[current.status] && Number(s.receivedAt) > Number(current.receivedAt))) row[n] = s;
+  });
+  return grid;
+}
+
+function mcScoreLabel(sub) {
+  if (!sub) return "—";
+  if (sub.status === "approved") return sub.score === null || sub.score === undefined ? "Approved" : String(sub.score);
+  return sub.status === "rejected" ? "Rejected" : "Pending";
+}
+
+function mcRenderScores() {
+  const body = document.getElementById("mc-scores");
+  body.replaceChildren();
+  const grid = mcScoreGrid();
+  TEAM_NAMES.forEach((name) => {
+    const row = document.createElement("tr");
+    row.appendChild(mcEl("td", "", name));
+    let total = 0;
+    for (let n = 1; n <= MISSIONS.length; n += 1) {
+      const sub = (grid[name] || {})[n];
+      if (sub && sub.status === "approved" && Number.isFinite(Number(sub.score))) total += Number(sub.score);
+      const cell = document.createElement("td");
+      cell.appendChild(mcEl("span", "mc-pill" + (sub && sub.status === "approved" ? " ok" : sub && sub.status === "rejected" ? " bad" : ""), mcScoreLabel(sub)));
+      row.appendChild(cell);
+    }
+    row.appendChild(mcEl("td", "", String(total)));
+    body.appendChild(row);
+  });
+}
+
+function mcDownloadExcel() {
+  const grid = mcScoreGrid();
+  const teamInfo = {};
+  mcData.teams.forEach((t) => { teamInfo[t.teamName] = t; });
+  const checkins = [["Team", "M1 checked in", "M2 checked in", "M3 checked in", "M4 checked in", "M5 checked in"]];
+  const scores = [["Team", "M1", "M2", "M3", "M4", "M5", "Total"]];
+  TEAM_NAMES.forEach((name) => {
+    const info = teamInfo[name] || {};
+    const crow = [name];
+    const srow = [name];
+    let total = 0;
+    for (let n = 1; n <= MISSIONS.length; n += 1) {
+      const at = n === 1 ? info.checkedInAt : (info.missionCheckins || {})[n];
+      crow.push(at ? new Date(at).toLocaleString() : "");
+      const sub = (grid[name] || {})[n];
+      if (sub && sub.status === "approved" && Number.isFinite(Number(sub.score))) { total += Number(sub.score); srow.push(Number(sub.score)); }
+      else srow.push(sub ? mcScoreLabel(sub) : "");
+    }
+    srow.push(total);
+    checkins.push(crow);
+    scores.push(srow);
+  });
+  const fileName = "geoops-" + (normalizeEventCode(localStorage.getItem(MC_EVENT_KEY)) || "event") + "-results";
+  if (window.XLSX) {
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(scores), "Scores");
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(checkins), "Check-ins");
+    XLSX.writeFile(book, fileName + ".xlsx");
+    return;
+  }
+  // Offline fallback: CSV with a BOM opens correctly in Excel.
+  const csv = (rows) => rows.map((r) => r.map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(",")).join("\r\n");
+  const blob = new Blob(["\uFEFF" + csv(scores) + "\r\n\r\n" + csv(checkins)], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = fileName + ".csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(link.href);
+}
+document.getElementById("mc-download").addEventListener("click", mcDownloadExcel);
 
 function mcRenderAnswer(container, value) {
   if (typeof value === "string" && /^https:\/\//i.test(value)) {
@@ -2420,6 +2618,13 @@ function mcRenderAnswer(container, value) {
 
 function mcRenderSubmissions() {
   const list = document.getElementById("mc-submissions");
+  // Keep scores typed but not yet saved (and the focused field) across the periodic refresh.
+  const drafts = {};
+  let focusedId = null;
+  list.querySelectorAll("input.mc-score").forEach((input) => {
+    if (input.value !== input.defaultValue) drafts[input.dataset.sid] = input.value;
+    if (input === document.activeElement) focusedId = input.dataset.sid;
+  });
   list.replaceChildren();
   document.querySelectorAll("#mc-filters .mc-btn").forEach((b) => b.classList.toggle("active", b.dataset.filter === mcFilter));
   const rows = mcData.submissions
@@ -2452,7 +2657,9 @@ function mcRenderSubmissions() {
     score.type = "number"; score.min = "0"; score.max = "10"; score.step = "0.5";
     score.className = "mc-score"; score.placeholder = "0–10";
     score.setAttribute("aria-label", "Score out of 10");
-    if (s.score !== null && s.score !== undefined) score.value = s.score;
+    score.dataset.sid = s.submissionId;
+    if (s.score !== null && s.score !== undefined) { score.value = s.score; score.defaultValue = String(s.score); }
+    if (drafts[s.submissionId] !== undefined) score.value = drafts[s.submissionId];
     const send = (status) => {
       review.querySelectorAll("button").forEach((b) => { b.disabled = true; });
       mcApi({ action: "review", key: mcKey, submissionId: s.submissionId, status: status, score: score.value })
@@ -2471,6 +2678,10 @@ function mcRenderSubmissions() {
     card.appendChild(review);
     list.appendChild(card);
   });
+  if (focusedId) {
+    const again = Array.from(list.querySelectorAll("input.mc-score")).find((i) => i.dataset.sid === focusedId);
+    if (again) again.focus();
+  }
 }
 
 function mcOpenDashboard(password, data) {
@@ -2484,10 +2695,8 @@ function mcOpenDashboard(password, data) {
   document.getElementById("mc-updated").textContent = "Updated " + new Date().toLocaleTimeString();
   mcRender();
   if (FIREBASE_ON) {
-    const code = normalizeEventCode(localStorage.getItem(MC_EVENT_KEY));
-    const banner = document.getElementById("mc-event-banner");
-    banner.textContent = "Event code to share with your teams: " + code;
-    banner.hidden = false;
+    mcRenderStopState(!!data.stopped);
+    document.getElementById("mc-event-banner").hidden = false;
   }
   clearInterval(mcTimerId);
   mcTimerId = setInterval(mcRefresh, FIREBASE_ON ? 8000 : 20000);
@@ -2504,7 +2713,7 @@ document.getElementById("mc-create").addEventListener("click", async () => {
     const created = await fbCreateEvent(input.value);
     if (created.error) {
       error.textContent = created.error === "OPERATION_NOT_ALLOWED"
-        ? "Live sync is not fully set up for this copy of GeoOps."
+        ? "Firebase rejected sign-up. Confirm Email/Password is enabled in the Firebase project matching this page's API key."
         : "Could not create the event (" + created.error + ").";
       return;
     }
@@ -2550,7 +2759,28 @@ document.getElementById("mc-refresh").addEventListener("click", mcRefresh);
   if (FIREBASE_ON) {
     document.getElementById("mc-cloud-fields").hidden = false;
     document.getElementById("mc-create").hidden = false;
-    document.getElementById("mc-import").hidden = true;
+    document.getElementById("mc-import").hidden = false;
+    document.querySelector('label[for="mc-event-code"]').hidden = true;
+    document.getElementById("mc-event-code").hidden = true;
+    document.getElementById("mc-import-btn").addEventListener("click", async () => {
+      const box = document.getElementById("mc-import-text");
+      const msg = document.getElementById("mc-import-msg");
+      const button = document.getElementById("mc-import-btn");
+      button.disabled = true;
+      msg.textContent = "Importing…";
+      try {
+        const result = await mcImportCodesCloud(box.value);
+        msg.textContent = result.found
+          ? result.added + " added, " + result.duplicate + " already in the event, " + result.invalid + " invalid, " + result.wrongEvent + " from a different event."
+          : "No result codes found in the pasted text.";
+        if (result.added || result.duplicate) box.value = "";
+        await mcRefresh();
+      } catch (error) {
+        msg.textContent = error.message === "denied" ? "This password does not control that event." : (error.message || "Import failed.");
+      } finally {
+        button.disabled = false;
+      }
+    });
     document.getElementById("mc-gate-event").value = localStorage.getItem(MC_EVENT_KEY) || "";
     document.getElementById("mc-gate-body").textContent = "New here? Choose a password and press “Create a new event”. Returning? Enter your event code and password.";
     document.getElementById("mc-unlock").textContent = "Open my event";
@@ -2655,6 +2885,8 @@ function startSessionNow() {
   cloudCheckin();
   tickEventClock();
   clockId = setInterval(tickEventClock, 1000);
+  pollEventStop();
+  setInterval(pollEventStop, 8000);
 }
 
 function showRoute(route) {

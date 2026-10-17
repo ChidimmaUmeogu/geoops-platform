@@ -62,7 +62,7 @@ What the rules do:
 - Event codes are random (for example `KRT-4821`), so nobody can claim an event meant for someone else.
 
 ## 5. Paste the config into the page
-In `geoops-platform.html`, find `FIREBASE_CONFIG` and fill in both values:
+In `index.html`, find `FIREBASE_CONFIG` and fill in both values:
 
 ```js
 const FIREBASE_CONFIG = {
