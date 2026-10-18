@@ -173,6 +173,11 @@
     font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(71,80,70,0.85);
     margin-top: 26px;
   }
+  .guide-download {
+    display: inline-block; margin-top: 22px; padding: 11px 20px; border: 1px solid #C97A2B; border-radius: 2px; background: #FFF8EC;
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #8A4F12; text-decoration: none;
+  }
+  .guide-download:hover, .guide-download:focus-visible { background: #C97A2B; color: #fff; }
   .route-screen { display: none; }
   .route-screen.active { display: block; }
   .route-topbar {
@@ -469,6 +474,12 @@
   .mc-stat b { display: block; font-family: 'Space Grotesk', sans-serif; font-size: 26px; color: #1F3025; }
   .mc-stat span { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: #526357; }
   .mc-heading { font-family: 'Space Grotesk', sans-serif; font-size: 20px; color: #1F3025; margin: 26px 0 10px; }
+  #mc-judging { background: #FFF8EC; border: 2px solid #C97A2B; border-radius: 10px; padding: 18px 20px 20px; margin: 26px 0; box-shadow: 0 6px 18px rgba(201,122,43,0.18); }
+  #mc-judging[hidden] { display: none; }
+  #mc-judging .mc-heading { margin-top: 0; border-left: 0; padding-left: 0; }
+  #mc-judging .mc-heading::before { content: "★ OWNER ONLY"; display: block; font-size: 11px; letter-spacing: 0.12em; color: #C97A2B; margin-bottom: 4px; }
+  #mc-judging .mc-review { padding-top: 12px; border-top: 1px dashed #E3C9A5; }
+  #mc-judging .mc-review:first-of-type { border-top: 0; }
   .mc-table-wrap { overflow-x: auto; border: 1px solid #B7C0B6; background: #F5F3EB; }
   .mc-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   .mc-table th { text-align: left; font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #9A5A24; padding: 10px; border-bottom: 1px solid #B7C0B6; }
@@ -711,6 +722,10 @@
       </button>
     </div>
 
+    <div style="text-align:center;">
+      <a class="guide-download" href="GeoOps-User-Guide.docx" download="GeoOps-User-Guide.docx">⬇ Download the user guide (Word)</a>
+    </div>
+
     <div class="command-footer">NAU · Dept. Geography &amp; Meteorology · Ecosynthra Lab</div>
   </div>
 
@@ -846,6 +861,9 @@
             <label class="field-label-sm" for="mc-min-judges" style="margin:0;">Minimum judges per submission</label>
             <input class="mc-input mc-score" id="mc-min-judges" type="number" min="1" max="10" step="1" value="2" />
             <button class="mc-btn" id="mc-min-save" type="button">Save</button>
+          </div>
+          <div class="mc-review">
+            <label class="field-label-sm" for="mc-owner-judges" style="margin:0;"><input type="checkbox" id="mc-owner-judges" /> I am also judging (my scores count toward the average and the minimum)</label>
           </div>
           <div class="mc-review">
             <input class="mc-input" id="mc-judge-pass" type="text" autocomplete="off" placeholder="Shared judge password (6+ characters)" style="max-width:320px;" />
@@ -1377,7 +1395,7 @@ function renderProjectedLeaderboard() {
     return (
       '<div class="leaderboard-row ' + (rank <= 3 ? 'top' : '') + '">' +
         '<div class="leaderboard-rank">' + medal + '</div>' +
-        '<div class="leaderboard-name">' + row.team + '</div>' +
+        '<div class="leaderboard-name">' + String(row.team).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])) + '</div>' +
         '<div class="leaderboard-bar"><span style="width:' + barWidth + '%"></span></div>' +
         '<div class="leaderboard-score">' + row.total.toFixed(1) + ' <span>pts</span></div>' +
       '</div>'
@@ -2131,7 +2149,7 @@ function latestSubmissions(subs) {
   const byTeam = {};
   subs.forEach((s) => {
     const n = missionIndexOf(s.mission);
-    if (!s.teamName || n < 1 || n > MISSIONS.length) return;
+    if (!s.teamName || TEAM_NAMES.indexOf(s.teamName) === -1 || n < 1 || n > MISSIONS.length) return;
     const row = (byTeam[s.teamName] = byTeam[s.teamName] || {});
     if (!row[n] || Number(s.receivedAt) > Number(row[n].receivedAt)) row[n] = s;
   });
@@ -2143,8 +2161,27 @@ function mcMinJudges() {
   return value >= 1 ? value : MIN_JUDGES_DEFAULT;
 }
 
+/* The owner's scores live under an "owner__" key (judge keys can never contain a double underscore)
+   and only count while the owner has switched on "I am also judging". */
+const OWNER_SCORE_PREFIX = "owner__";
+
+function countedScores(perSubmission, config) {
+  const ownerCounts = !!(config && config.ownerJudges === true);
+  return Object.keys(perSubmission || {})
+    .filter((k) => perSubmission[k] && (ownerCounts || k.indexOf(OWNER_SCORE_PREFIX) !== 0))
+    .map((k) => perSubmission[k]);
+}
+
+function mcScoreKey() {
+  return mcRole === "owner" ? OWNER_SCORE_PREFIX + judgeKey(mcJudgeName) : judgeKey(mcJudgeName);
+}
+
+function mcCanScore() {
+  return mcRole === "judge" || (mcData.config && mcData.config.ownerJudges === true);
+}
+
 function mcSubmissionScores(sid) {
-  return Object.values((mcData.scores || {})[sid] || {}).filter(Boolean);
+  return countedScores((mcData.scores || {})[sid], mcData.config);
 }
 
 function mcGradingProgress() {
@@ -2409,7 +2446,7 @@ function fbPublish(base, token, data) {
         approved[s.submissionId] = { teamName: team, mission: s.mission, elapsed: s.elapsed || "" };
         return;
       }
-      const avg = averageScores(Number(n), Object.values((data.scores || {})[s.submissionId] || {}));
+      const avg = averageScores(Number(n), countedScores((data.scores || {})[s.submissionId], data.config));
       if (avg.count < minJudges) { skipped += 1; return; }
       approved[s.submissionId] = { teamName: team, mission: s.mission, elapsed: s.elapsed || "", score: avg.total };
       const key = teamKey(team);
@@ -2476,7 +2513,7 @@ function cloudApi(body) {
   return signIn.then(fbToken).then((token) => {
     if (!token) return { ok: false, code: "unauthorized", error: mcRole === "judge" ? "Incorrect event code or judge password." : "Incorrect event code or password." };
     const base = "events/" + encodeURIComponent(event);
-    const ownerOnly = ["verifyTeam", "review", "setStopped", "setMinJudges", "publish", "setJudgeAccess"];
+    const ownerOnly = ["verifyTeam", "review", "setStopped", "setMinJudges", "setOwnerJudging", "publish", "setJudgeAccess"];
     if (mcRole === "judge" && ownerOnly.indexOf(body.action) !== -1) return { ok: false, error: "Only the event owner can do that." };
     let write = Promise.resolve();
     let publishInfo = null;
@@ -2495,13 +2532,16 @@ function cloudApi(body) {
         criteria[c.id] = value;
         total += value;
       }
-      write = fetch(fbUrl(base + "/scores/" + encodeURIComponent(sub.submissionId) + "/" + judgeKey(judge), token), {
-        method: "PUT", body: JSON.stringify({ judge: judge, criteria: criteria, total: round2(total), at: Date.now() })
+      if (mcRole === "owner" && !(mcData.config && mcData.config.ownerJudges === true)) return { ok: false, error: "Turn on “I am also judging” to score as the owner." };
+      write = fetch(fbUrl(base + "/scores/" + encodeURIComponent(sub.submissionId) + "/" + (mcRole === "owner" ? OWNER_SCORE_PREFIX : "") + judgeKey(judge), token), {
+        method: "PUT", body: JSON.stringify({ judge: mcRole === "owner" ? judge + " (owner)" : judge, criteria: criteria, total: round2(total), at: Date.now() })
       }).then(fbJson);
     } else if (body.action === "setMinJudges") {
       const value = Math.floor(Number(body.value));
       if (!(value >= 1 && value <= 10)) return { ok: false, error: "Minimum judges must be between 1 and 10." };
       write = fetch(fbUrl(base + "/config/minJudges", token), { method: "PUT", body: JSON.stringify(value) }).then(fbJson);
+    } else if (body.action === "setOwnerJudging") {
+      write = fetch(fbUrl(base + "/config/ownerJudges", token), { method: "PUT", body: JSON.stringify(body.value === true) }).then(fbJson);
     } else if (body.action === "setJudgeAccess") {
       if (String(body.password || "").length < 6) return { ok: false, error: "Choose a judge password of at least 6 characters." };
       write = fbSetJudgeAccess(event, token, String(body.password));
@@ -2643,7 +2683,7 @@ function buildLeaderboardEntries(approved) {
   const byTeam = {};
   approved.forEach((row) => {
     const mission = missionIndexOf(row.mission);
-    if (!row.teamName || mission < 1 || mission > MISSIONS.length) return;
+    if (!row.teamName || TEAM_NAMES.indexOf(row.teamName) === -1 || mission < 1 || mission > MISSIONS.length) return;
     (byTeam[row.teamName] = byTeam[row.teamName] || {})[mission] = row;
   });
   return Object.keys(byTeam).map((team) => {
@@ -2744,8 +2784,10 @@ document.getElementById("mc-stop").addEventListener("click", () => {
     .finally(() => { btn.disabled = false; });
 });
 
+let mcRefreshInFlight = false;
 function mcRefresh() {
-  if (!mcKey) return Promise.resolve();
+  if (!mcKey || mcRefreshInFlight || document.hidden) return Promise.resolve();
+  mcRefreshInFlight = true;
   return mcApi({ action: "list", key: mcKey }).then((data) => {
     if (!mcKey) return;
     if (data && data.code === "unauthorized") {
@@ -2762,7 +2804,7 @@ function mcRefresh() {
     mcRender();
   }).catch(() => {
     mcSetError("Could not load data.");
-  });
+  }).finally(() => { mcRefreshInFlight = false; });
 }
 
 function mcRender() {
@@ -3022,14 +3064,15 @@ function mcRenderSubmissionsCloud() {
   list.replaceChildren();
   document.querySelectorAll("#mc-filters .mc-btn").forEach((b) => b.classList.toggle("active", b.dataset.filter === mcFilter));
 
-  const myKey = judgeKey(mcJudgeName);
+  const myKey = mcScoreKey();
+  const canScore = mcCanScore();
   const myEntry = (s) => ((mcData.scores || {})[s.submissionId] || {})[myKey] || null;
   const latest = latestSubmissions(mcData.submissions);
   const all = [];
   Object.keys(latest).forEach((team) => Object.keys(latest[team]).forEach((n) => all.push(latest[team][n])));
   const rows = all
     .filter((s) => {
-      if (mcFilter === "all") return true;
+      if (mcFilter === "all" || !canScore) return true;
       if (!RUBRICS[missionIndexOf(s.mission)]) return false;
       return mcFilter === "done" ? !!myEntry(s) : !myEntry(s);
     })
@@ -3046,7 +3089,7 @@ function mcRenderSubmissionsCloud() {
     const mine = myEntry(s);
     const card = mcEl("div", "mc-sub");
     const head = mcEl("div", "mc-sub-head");
-    const pillText = !rubric ? "auto-scored" : mcRole === "owner"
+    const pillText = !rubric ? "auto-scored" : !canScore
       ? entries.length + " judge" + (entries.length === 1 ? "" : "s") + (entries.length ? " · avg " + averageScores(n, entries).total + "/10" : "")
       : mine ? "scored by you · " + mine.total + "/10" : "not scored by you";
     head.append(mcEl("div", "mc-sub-title", s.teamName + " — " + s.mission),
@@ -3073,6 +3116,8 @@ function mcRenderSubmissionsCloud() {
     if (mcRole === "owner" && entries.length) {
       card.appendChild(mcEl("div", "mc-sub-meta", "Judges: " + entries.map((e) => (e.judge || "?") + " " + e.total).join(" · ")));
     }
+
+    if (!canScore) { list.appendChild(card); return; }
 
     const inputs = [];
     const totalEl = mcEl("div", "mc-rubric-total");
@@ -3129,6 +3174,8 @@ function mcRenderJudging() {
   if (panel.hidden) return;
   const minInput = document.getElementById("mc-min-judges");
   if (document.activeElement !== minInput) minInput.value = mcMinJudges();
+  const ownerBox = document.getElementById("mc-owner-judges");
+  if (document.activeElement !== ownerBox) ownerBox.checked = !!(mcData.config && mcData.config.ownerJudges === true);
   const progress = mcGradingProgress();
   document.getElementById("mc-judging-status").textContent =
     progress.graded + " of " + progress.gradeable + " scored submissions have at least " + mcMinJudges() + " judge" + (mcMinJudges() === 1 ? "" : "s") + ". " +
@@ -3161,6 +3208,10 @@ function mcOwnerAction(body, buttonId, messageId, doneText) {
     .finally(() => { button.disabled = false; });
 }
 
+document.getElementById("mc-owner-judges").addEventListener("change", (e) => {
+  mcOwnerAction({ action: "setOwnerJudging", value: e.target.checked }, "mc-owner-judges", "mc-publish-msg",
+    e.target.checked ? "You are now judging. Your scores count; publish again to apply." : "You are administering only. Your scores no longer count; publish again to apply.");
+});
 document.getElementById("mc-min-save").addEventListener("click", () => {
   mcOwnerAction({ action: "setMinJudges", value: document.getElementById("mc-min-judges").value }, "mc-min-save", "mc-publish-msg", "Minimum judges saved. Publish again to apply it.");
 });
