@@ -884,6 +884,7 @@
         <div class="mc-updated" id="mc-scores-note">Facilitator scores out of 10. Only approved submissions carry a score; rejected and pending ones are marked.</div>
         <div class="mc-actions" style="margin:8px 0;">
           <button class="mc-btn" id="mc-download" type="button">Download Excel</button>
+          <button class="mc-btn" id="mc-download-word" type="button">Download submissions (Word)</button>
         </div>
         <div class="mc-table-wrap">
           <table class="mc-table">
@@ -2958,6 +2959,43 @@ function mcDownloadExcel() {
   URL.revokeObjectURL(link.href);
 }
 document.getElementById("mc-download").addEventListener("click", mcDownloadExcel);
+
+function mcDownloadWord() {
+  const esc = (v) => String(v === null || v === undefined ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const multiline = (v) => esc(v).replace(/\r?\n/g, "<br>");
+  const latest = latestSubmissions(mcData.submissions);
+  const teams = Object.keys(latest).sort((a, b) => a.localeCompare(b));
+  if (!teams.length) { alert("No submissions to export yet."); return; }
+  const code = normalizeEventCode(localStorage.getItem(MC_EVENT_KEY)) || "event";
+  let body = "<h1>GeoOps submissions" + (code !== "event" ? " — " + esc(code) : "") + "</h1>" +
+    "<p>Latest submission per team for Missions 2–5. Exported " + esc(new Date().toLocaleString()) + ".</p>";
+  teams.forEach((team) => {
+    body += '<h2 style="page-break-before:always">' + esc(team) + "</h2>";
+    let any = false;
+    for (let n = 2; n <= MISSIONS.length; n += 1) {
+      const s = latest[team][n];
+      if (!s) continue;
+      any = true;
+      body += "<h3>" + esc(s.mission) + "</h3><p><i>Submitted " + esc(mcFormatTime(s.receivedAt)) + " · event time " + esc(s.elapsed || "—") + "</i></p>";
+      Object.keys(s.answers || {}).forEach((key) => {
+        const value = s.answers[key];
+        const text = value !== null && typeof value === "object" ? JSON.stringify(value, null, 2) : value;
+        body += "<p><b>" + esc(key) + "</b><br>" + multiline(text) + "</p>";
+      });
+    }
+    if (!any) body += "<p><i>No submissions for Missions 2–5.</i></p>";
+  });
+  const html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">' +
+    '<head><meta charset="utf-8"><title>GeoOps submissions</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt}h1{font-size:20pt}h2{font-size:16pt;color:#1f4e79}h3{font-size:13pt}</style></head><body>' + body + "</body></html>";
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob(["\uFEFF" + html], { type: "application/msword" }));
+  link.download = "geoops-" + code + "-submissions.doc";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(link.href);
+}
+document.getElementById("mc-download-word").addEventListener("click", mcDownloadWord);
 
 function mcRenderAnswer(container, value) {
   if (typeof value === "string" && /^https:\/\//i.test(value)) {
