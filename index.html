@@ -1707,6 +1707,19 @@ function submitMission1() {
 /* ============================================================
    Mission 2 — Spot the Disturbance (real data-source integration)
    ============================================================ */
+const EARTH_GUIDES = {
+  historical: ["Guide: Historical imagery", "https://developers.google.com/maps/documentation/earth/historical-imagery"],
+  detect: ["Guide: Detect change", "https://developers.google.com/maps/documentation/earth/detect-change"],
+  style: ["Guide: Style your places", "https://developers.google.com/maps/documentation/earth/style-your-places"],
+  projects: ["Guide: Manage, export and share projects", "https://developers.google.com/maps/documentation/earth/manage-projects-homescreen?platform=computer"],
+};
+
+function guideLinksHtml(keys) {
+  return '<div class="coord-hint" style="margin-top:10px;">' + keys.map((k) =>
+    '<a href="' + EARTH_GUIDES[k][1] + '" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;">' + EARTH_GUIDES[k][0] + ' ↗</a>'
+  ).join(" &nbsp;·&nbsp; ") + '</div>';
+}
+
 function buildMission2Content() {
   const wrap = document.createElement("div");
 
@@ -1717,8 +1730,10 @@ function buildMission2Content() {
     '<div class="timelapse-row"><a class="timelapse-btn" href="' + GOOGLE_EARTH_AOI_URL + '" target="_blank" rel="noopener">Open the starting view in Google Earth ↗</a></div>' +
     '<div class="coord-hint">The button opens a starting view only; you still navigate from there yourself. No shared project or reference layer is required. Move into the <b>Oban-Group Forest Reserve</b> area and work at roughly the scale of one forest block, not the whole state.</div>' +
     '<div class="coord-hint" style="margin-top:10px;">Use the historical imagery control to compare dates. The stable reference point is <b>5.4589, 8.3522</b>. Compare that intact-looking area with the disturbance area you identify, using the same or nearby years.</div>' +
-    '<div class="coord-hint" style="margin-top:10px;">Choose two years to compare and record them. A change signal is a lead, not proof: check edge sharpness, canopy texture, roads, rivers, soil moisture, and crop cycles against the historical imagery before calling it deforestation.</div>';
-  wrap.appendChild(timelapseBlock);
+    '<div class="coord-hint" style="margin-top:10px;">Choose two years to compare and record them. A change signal is a lead, not proof: check edge sharpness, canopy texture, roads, and rivers against the historical imagery     before calling it deforestation.</div>' +
+        '<div class="coord-hint" style="margin-top:10px;"><b>Optional:</b> Google Earth\'s <b>Tools → Detect change</b> compares two years and draws a change heatmap over your area. It can also highlight things that are not forest loss (such as soil moisture or flooding), so always confirm each highlighted area in historical imagery before you flag it.</div>' +
+        guideLinksHtml(["historical", "detect"]);
+      wrap.appendChild(timelapseBlock);
 
   const mapsBlock = document.createElement("div");
   mapsBlock.className = "tool-block";
@@ -1729,12 +1744,12 @@ function buildMission2Content() {
     '<ol class="map-directions">' +
       '<li>Open <strong>Google Earth</strong> and create a new project for your team.</li>' +
       '<li>Add your disturbance area and nearby access routes as project features. Name each feature clearly.</li>' +
-      '<li>Use the project\'s measurement tools to estimate the disturbance area in hectares.</li>' +
       '<li>Click <strong>Share project</strong>, set access so the facilitator can view it, and copy the project link.</li>' +
       '<li>Paste that shared link into Step 3 and submit it with your findings.</li>' +
     '</ol>' +
-    '<div class="coord-hint" style="margin-top:10px;">Your shared Google Earth project is the evidence map the facilitator reviews. Keep the project link accessible until judging is complete.</div>';
-  wrap.appendChild(mapsBlock);
+    '<div class="coord-hint" style="margin-top:10px;">Your shared Google Earth project is the evidence map the facilitator reviews.     Keep the project link accessible until judging is complete. In the Share dialog settings, leave <b>People who can download, copy, and print</b> ticked so judges can export and print your map.</div>' +
+        guideLinksHtml(["style", "projects"]);
+      wrap.appendChild(mapsBlock);
 
   const formBlock = document.createElement("div");
   formBlock.className = "tool-block";
@@ -1748,13 +1763,32 @@ function buildMission2Content() {
     DISTURBANCES.map((label, index) =>
       '<div class="route-card">' +
         '<div class="route-index">' + label + '</div>' +
-        '<label class="field-label-sm" for="m2-area-' + index + '">Area in hectares</label>' +
+        '<label class="field-label-sm" for="m2-year-' + index + '">Year it first appears in Google Earth\'s historical imagery</label>' +
+        '<input class="field-input-sm" id="m2-year-' + index + '" type="number" min="1980" max="2100" step="1" placeholder="e.g. 2015" />' +
+        '<label class="field-label-sm" for="m2-first-' + index + '">Size at first appearance (hectares)</label>' +
+        '<input class="field-input-sm" id="m2-first-' + index + '" type="number" min="0" step="any" placeholder="e.g. 12" />' +
+        '<label class="field-label-sm" for="m2-area-' + index + '">Current size (hectares)</label>' +
         '<input class="field-input-sm" id="m2-area-' + index + '" type="number" min="0" step="any" placeholder="e.g. 42" />' +
+        '<label class="field-label-sm" for="m2-cond-' + index + '">Current condition</label>' +
+        '<select class="field-input-sm" id="m2-cond-' + index + '">' +
+          '<option value="">— Select —</option>' +
+          '<option value="Still active">Still active</option>' +
+          '<option value="Recovered">Recovered</option>' +
+        '</select>' +
+        '<label class="field-label-sm" for="m2-note-' + index + '">Change noted (what changed between first appearance and now?)</label>' +
+        '<textarea class="field-input-sm" id="m2-note-' + index + '" placeholder="e.g. Patch widened westward along a new track; edges now sharp and bare."></textarea>' +
       '</div>'
     ).join("") +
     '<div class="field-block">' +
-      '<label class="field-label-sm">Which year(s) does the disturbance first appear in Google Earth\'s historical imagery?</label>' +
-      '<input class="field-input-sm" id="m2-year" type="text" placeholder="e.g. 2015" />' +
+      '<label class="field-label-sm">Focus area — pick ONE of your five disturbance areas and focus fully on it for the questions below</label>' +
+      '<select class="field-input-sm" id="m2-focus">' +
+        '<option value="">— Select —</option>' +
+        DISTURBANCES.map((label) => '<option value="' + label + '">' + label + '</option>').join("") +
+      '</select>' +
+    '</div>' +
+    '<div class="field-block">' +
+      '<label class="field-label-sm">For your focus area, walk through Google Earth\'s historical imagery year by year: in which year(s) does the disturbance first appear, and how does it develop after that?</label>' +
+      '<input class="field-input-sm" id="m2-year" type="text" placeholder="e.g. First visible 2015; doubled in size by 2019" />' +
     '</div>' +
     '<div class="field-block">' +
       '<label class="field-label-sm">Imagery comparison — which two years did you compare, what changed over your flagged area, and why did you choose those years?</label>' +
@@ -1772,8 +1806,13 @@ function buildMission2Content() {
     const projectUrl = document.getElementById("m2-project-url").value.trim();
     const areas = DISTURBANCES.map((label, index) => ({
       label: label,
-      hectares: document.getElementById("m2-area-" + index).value.trim()
+      firstAppearanceYear: document.getElementById("m2-year-" + index).value.trim(),
+      areaAtFirstAppearanceHa: document.getElementById("m2-first-" + index).value.trim(),
+      currentAreaHa: document.getElementById("m2-area-" + index).value.trim(),
+      currentCondition: document.getElementById("m2-cond-" + index).value,
+      changeNoted: document.getElementById("m2-note-" + index).value.trim()
     }));
+    const focus = document.getElementById("m2-focus").value;
     const year = document.getElementById("m2-year").value;
     const changeDetect = document.getElementById("m2-changedetect").value;
     const justify = document.getElementById("m2-justify").value;
@@ -1781,8 +1820,9 @@ function buildMission2Content() {
       alert("Paste the shared Google Earth project link, for example: https://earth.google.com/earth/d/your-project-id");
       return;
     }
-    if (areas.some((area) => !area.hectares) || !year || !changeDetect.trim() || !justify.trim()) {
-      alert("Enter the hectares for all five disturbance areas and complete the remaining fields before submitting.");
+    if (areas.some((a) => !a.firstAppearanceYear || !a.areaAtFirstAppearanceHa || !a.currentAreaHa || !a.currentCondition || !a.changeNoted) ||
+        !focus || !year.trim() || !changeDetect.trim() || !justify.trim()) {
+      alert("Complete every field for all five disturbance areas (year, sizes, condition, change noted), choose your focus area, and complete the remaining fields before submitting.");
       return;
     }
     document.getElementById("m2-submit").style.display = "none";
@@ -1797,7 +1837,8 @@ function buildMission2Content() {
     logSubmission("Mission 2 — Spot the Disturbance", {
       projectUrl: projectUrl,
       disturbances: areas,
-      firstAppearanceYear: year,
+      focusArea: focus,
+      focusAreaTimeline: year,
       imageryComparison: changeDetect,
       disturbanceJustification: justify
     }, "m2-send-status");
@@ -1842,22 +1883,27 @@ function buildMission3Content() {
   mapsBlock.innerHTML =
     '<div class="tool-label">Trace access routes in your Google Earth project</div>' +
     '<div class="coord-hint">Use the shared Google Earth project you created in Mission 2. Add route lines near the disturbance area, then compare their continuity, sharpness, regrowth, and connection to cleared patches.</div>' +
-    '<div class="coord-hint" style="margin-top:10px;">Your shared project link remains the evidence map the facilitator reviews. Your route classifications and written reasoning below complete the record.</div>';
-  wrap.appendChild(mapsBlock);
+    '<div class="coord-hint" style="margin-top:10px;">Your shared project link remains the evidence map the facilitator reviews. Your route classifications and written reasoning below     complete the record.</div>' +
+        guideLinksHtml(["style", "historical"]);
+      wrap.appendChild(mapsBlock);
 
-  const classifyBlock = document.createElement("div");
+      const classifyBlock = document.createElement("div");
   classifyBlock.className = "tool-block";
   classifyBlock.innerHTML = '<div class="tool-label">Classify each route</div>';
   const routeAnswers = {};
-  const routeLengths = {};
 
   ROUTES.forEach((route, i) => {
     const card = document.createElement("div");
     card.className = "route-card";
     card.innerHTML =
       '<div class="route-index">' + route.label + ' — ' + route.coords + '</div>' +
-      '<label class="field-label-sm" for="m3-length-' + i + '">Route length (metres)</label>' +
-      '<input class="field-input-sm" id="m3-length-' + i + '" type="number" min="0" step="any" placeholder="e.g. 850" />';
+      '<label class="field-label-sm" for="m3-year-' + i + '">Year it first appears in Google Earth\'s historical imagery</label>' +
+      '<input class="field-input-sm" id="m3-year-' + i + '" type="number" min="1980" max="2100" step="1" placeholder="e.g. 2015" />' +
+      '<label class="field-label-sm" for="m3-first-' + i + '">Length at first appearance (metres)</label>' +
+      '<input class="field-input-sm" id="m3-first-' + i + '" type="number" min="0" step="any" placeholder="e.g. 400" />' +
+      '<label class="field-label-sm" for="m3-length-' + i + '">Current length (metres)</label>' +
+      '<input class="field-input-sm" id="m3-length-' + i + '" type="number" min="0" step="any" placeholder="e.g. 850" />' +
+      '<label class="field-label-sm">Current condition</label>';
     const row = document.createElement("div");
     row.className = "route-choice-row";
     ["active", "inactive"].forEach((status) => {
@@ -1866,7 +1912,7 @@ function buildMission3Content() {
       btn.type = "button";
       btn.dataset.routeIndex = i;
       btn.dataset.routeStatus = status;
-      btn.textContent = status === "active" ? "Active route" : "Inactive / closed";
+      btn.textContent = status === "active" ? "Still active" : "Recovered / inactive";
       btn.addEventListener("click", () => {
         routeAnswers[i] = status;
         Array.from(row.children).forEach((c) => c.classList.remove("selected"));
@@ -1877,9 +1923,13 @@ function buildMission3Content() {
       row.appendChild(btn);
     });
     card.appendChild(row);
-    card.querySelector("#m3-length-" + i).addEventListener("input", (event) => {
-      routeLengths[i] = event.target.value.trim();
-      checkM3Ready();
+    const noteWrap = document.createElement("div");
+    noteWrap.innerHTML =
+      '<label class="field-label-sm" for="m3-note-' + i + '">Change noted (what changed between first appearance and now?)</label>' +
+      '<textarea class="field-input-sm" id="m3-note-' + i + '" placeholder="e.g. Track extended north towards the cleared patch; surface now bare and rutted."></textarea>';
+    card.appendChild(noteWrap);
+    card.querySelectorAll("input.field-input-sm, textarea.field-input-sm").forEach((field) => {
+      field.addEventListener("input", checkM3Ready);
     });
     classifyBlock.appendChild(card);
   });
@@ -1889,6 +1939,17 @@ function buildMission3Content() {
   justifyBlock.className = "tool-block";
   justifyBlock.innerHTML =
     '<div class="field-block">' +
+      '<label class="field-label-sm">Focus route — pick ONE of your five routes and focus fully on it for the questions below</label>' +
+      '<select class="field-input-sm" id="m3-focus">' +
+        '<option value="">— Select —</option>' +
+        ROUTES.map((route) => '<option value="' + route.label + '">' + route.label + '</option>').join("") +
+      '</select>' +
+    '</div>' +
+    '<div class="field-block">' +
+      '<label class="field-label-sm">For your focus route, walk through Google Earth\'s historical imagery year by year: in which year(s) does the route first appear, and how does it develop after that?</label>' +
+      '<input class="field-input-sm" id="m3-timeline" type="text" placeholder="e.g. First visible 2014; extended by 2018; regrowth from 2021" />' +
+    '</div>' +
+    '<div class="field-block">' +
       '<label class="field-label-sm">What does the route pattern suggest — is disturbance ongoing or historical?</label>' +
       '<textarea class="field-input-sm" id="m3-justify" placeholder="Note: satellite imagery can suggest activity status but can\'t confirm cause..."></textarea>' +
     '</div>' +
@@ -1896,16 +1957,24 @@ function buildMission3Content() {
     '<div id="m3-confirm"></div>';
   wrap.appendChild(justifyBlock);
 
+  const m3Val = (id) => (document.getElementById(id) ? document.getElementById(id).value.trim() : "");
+  function m3RoutesComplete() {
+    return ROUTES.every((route, i) =>
+      routeAnswers[i] && m3Val("m3-year-" + i) && m3Val("m3-first-" + i) && m3Val("m3-length-" + i) && m3Val("m3-note-" + i));
+  }
   function checkM3Ready() {
-    document.getElementById("m3-submit").disabled = Object.keys(routeAnswers).length < ROUTES.length || Object.keys(routeLengths).length < ROUTES.length || Object.values(routeLengths).some((length) => !length);
+    document.getElementById("m3-submit").disabled = !m3RoutesComplete();
   }
 
   wrap.querySelector("#m3-submit").addEventListener("click", () => {
     const justify = document.getElementById("m3-justify").value;
-    if (Object.keys(routeLengths).length < ROUTES.length || Object.values(routeLengths).some((length) => !length)) {
-      alert("Enter the length in metres for all five routes before submitting.");
+    const focus = m3Val("m3-focus");
+    const timeline = m3Val("m3-timeline");
+    if (!m3RoutesComplete()) {
+      alert("Complete every field for all five routes (year, lengths, condition, change noted) before submitting.");
       return;
     }
+    if (!focus || !timeline) { alert("Choose your focus route and describe its year-by-year development before submitting."); return; }
     if (!justify.trim()) { alert("Add your written justification before submitting."); return; }
 
     document.getElementById("m3-submit").style.display = "none";
@@ -1920,9 +1989,13 @@ function buildMission3Content() {
     logSubmission("Mission 3 — Trace the Route",
       { routes: ROUTES.map((route, index) => ({
         label: route.label,
+        firstAppearanceYear: m3Val("m3-year-" + index),
+        lengthAtFirstAppearanceMetres: m3Val("m3-first-" + index),
+        currentLengthMetres: m3Val("m3-length-" + index),
+        currentCondition: routeAnswers[index] === "active" ? "Still active" : "Recovered / inactive",
         classification: routeAnswers[index],
-        lengthMetres: routeLengths[index]
-      })), routeJustification: justify },
+        changeNoted: m3Val("m3-note-" + index)
+      })), focusRoute: focus, focusRouteTimeline: timeline, routeJustification: justify },
       "m3-send-status");
     document.getElementById("m3-continue").addEventListener("click", () => unlockNext(2));
   });
@@ -1957,6 +2030,10 @@ function buildMission4Content() {
       '<label class="field-label-sm">What would raise your confidence? (What evidence is missing?)</label>' +
       '<textarea class="field-input-sm" id="m4-raise" placeholder="e.g. more recent imagery, ground verification, corroborating records..."></textarea>' +
     '</div>' +
+    '<div class="field-block">' +
+      '<label class="field-label-sm">Printed map link (optional) — a shared Google My Maps or Drive link to your exported map</label>' +
+      '<input class="field-input-sm" id="m4-map" type="url" placeholder="https://..." />' +
+    '</div>' +
     '<button class="submit-btn" id="m4-submit" type="button">Submit synthesis</button>' +
     '<div id="m4-confirm"></div>';
   wrap.appendChild(block);
@@ -1978,7 +2055,7 @@ function buildMission4Content() {
         '<button class="continue-btn" id="m4-continue">Continue to Mission 5</button>' +
       '</div>';
     logSubmission("Mission 4 — From Data to Information",
-      { synthesis: synthesis, confidence: confidence, evidenceNeeded: raise }, "m4-send-status");
+      { synthesis: synthesis, confidence: confidence, evidenceNeeded: raise, mapLink: document.getElementById("m4-map").value.trim() }, "m4-send-status");
     document.getElementById("m4-continue").addEventListener("click", () => unlockNext(3));
   });
 
